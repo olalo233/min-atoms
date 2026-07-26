@@ -50,6 +50,13 @@
       "when": 1785080400000,
       "tag": "0006_generation-cancellation",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785084000000,
+      "tag": "0007_deployment-hardening",
+      "breakpoints": true
     }
   ]
 }

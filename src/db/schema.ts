@@ -23,50 +23,70 @@ export const users = pgTable("users", {
     .notNull(),
 });
 
-export const sessions = pgTable("sessions", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  tokenHash: text("token_hash").notNull().unique(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tokenHash: text("token_hash").notNull().unique(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [index("sessions_user_id_idx").on(table.userId)],
+);
 
-export const projects = pgTable("projects", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  ownerId: uuid("owner_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  activeArtifactVersionId: uuid("active_artifact_version_id").references(
-    (): AnyPgColumn => artifactVersions.id,
-    { onDelete: "restrict" },
-  ),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const projects = pgTable(
+  "projects",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    activeArtifactVersionId: uuid("active_artifact_version_id").references(
+      (): AnyPgColumn => artifactVersions.id,
+      { onDelete: "restrict" },
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("projects_owner_id_idx").on(table.ownerId),
+    index("projects_active_artifact_version_id_idx").on(
+      table.activeArtifactVersionId,
+    ),
+  ],
+);
 
-export const buildRequests = pgTable("build_requests", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  projectId: uuid("project_id")
-    .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
-  content: text("content").notNull(),
-  baseVersionId: uuid("base_version_id").references(
-    (): AnyPgColumn => artifactVersions.id,
-    { onDelete: "restrict" },
-  ),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const buildRequests = pgTable(
+  "build_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    baseVersionId: uuid("base_version_id").references(
+      (): AnyPgColumn => artifactVersions.id,
+      { onDelete: "restrict" },
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("build_requests_project_id_idx").on(table.projectId),
+    index("build_requests_base_version_id_idx").on(table.baseVersionId),
+  ],
+);
 
 export const generationJobs = pgTable(
   "generation_jobs",
@@ -98,6 +118,8 @@ export const generationJobs = pgTable(
       sql`${table.status} in ('queued', 'planning', 'generating', 'validating', 'repairing', 'completed', 'failed', 'cancelled')`,
     ),
     index("generation_jobs_project_id_idx").on(table.projectId),
+    index("generation_jobs_build_request_id_idx").on(table.buildRequestId),
+    index("generation_jobs_base_version_id_idx").on(table.baseVersionId),
     uniqueIndex("generation_jobs_one_active_project_idx")
       .on(table.projectId)
       .where(
@@ -146,6 +168,7 @@ export const artifactVersions = pgTable(
       .notNull(),
   },
   (table) => [
+    index("artifact_versions_job_id_idx").on(table.jobId),
     uniqueIndex("artifact_versions_project_version_idx").on(
       table.projectId,
       table.version,
