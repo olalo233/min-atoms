@@ -12,14 +12,29 @@ ALTER TABLE "generation_jobs" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "generation_events" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "artifact_versions" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "generated_app_data" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
-REVOKE ALL ON TABLE "users" FROM anon, authenticated;--> statement-breakpoint
-REVOKE ALL ON TABLE "sessions" FROM anon, authenticated;--> statement-breakpoint
-REVOKE ALL ON TABLE "projects" FROM anon, authenticated;--> statement-breakpoint
-REVOKE ALL ON TABLE "build_requests" FROM anon, authenticated;--> statement-breakpoint
-REVOKE ALL ON TABLE "generation_jobs" FROM anon, authenticated;--> statement-breakpoint
-REVOKE ALL ON TABLE "generation_events" FROM anon, authenticated;--> statement-breakpoint
-REVOKE ALL ON TABLE "artifact_versions" FROM anon, authenticated;--> statement-breakpoint
-REVOKE ALL ON TABLE "generated_app_data" FROM anon, authenticated;--> statement-breakpoint
+DO $$
+DECLARE
+  role_name text;
+  table_name text;
+BEGIN
+  FOREACH role_name IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
+      FOREACH table_name IN ARRAY ARRAY[
+        'users',
+        'sessions',
+        'projects',
+        'build_requests',
+        'generation_jobs',
+        'generation_events',
+        'artifact_versions',
+        'generated_app_data'
+      ] LOOP
+        EXECUTE format('REVOKE ALL ON TABLE %I FROM %I', table_name, role_name);
+      END LOOP;
+    END IF;
+  END LOOP;
+END
+$$;--> statement-breakpoint
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'min_atoms_app') THEN

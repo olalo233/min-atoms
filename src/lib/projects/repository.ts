@@ -1,18 +1,18 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import {
+  artifactVersions,
   buildRequests,
   generationEvents,
   generationJobs,
   projects,
-  artifactVersions,
   type BuildRequest,
+  type GenerationJob,
   type Project,
 } from "@/db/schema";
 import { getDb } from "@/lib/db/client";
 import { createGenerationJob } from "@/lib/generation/repository";
 import { ACTIVE_GENERATION_STATUSES } from "@/lib/generation/types";
-import { runGenerationJob } from "@/lib/generation/worker";
 
 const PROJECT_NAME_LIMIT = 72;
 
@@ -29,7 +29,7 @@ export function getInitialProjectName(buildRequest: string): string {
 export async function createProjectWithBuildRequest(
   ownerId: string,
   rawBuildRequest: string,
-): Promise<{ project: Project; buildRequest: BuildRequest }> {
+): Promise<{ project: Project; buildRequest: BuildRequest; job: GenerationJob }> {
   const content = normalizeBuildRequest(rawBuildRequest);
   if (!content) {
     throw new Error("Build request cannot be empty.");
@@ -52,9 +52,10 @@ export async function createProjectWithBuildRequest(
     return { project, buildRequest };
   });
 
+  // Persist the queued job here so the Route Handler owns scheduling via
+  // `after()` instead of raw fire-and-forget inside the repository.
   const job = await createGenerationJob(result.project.id, result.buildRequest.id);
-  void runGenerationJob(job.id);
-  return result;
+  return { ...result, job };
 }
 
 export async function listOwnedProjects(ownerId: string): Promise<Project[]> {
@@ -215,4 +216,65 @@ export async function getOwnedProject(
     .limit(1);
 
   return result[0] ?? null;
+}
+export type DeleteOwnedProjectResult = "deleted" | "active" | "not found";
+
+/**
+ * Transactionally delete the exact project owned by `ownerId`. The project
+ * advisory lock serializes this against concurrent generation work; an active
+ * job rejects the delete with `active`. RESTRICT references into
+ * `artifact_versions` (the project's active pointer plus every build request
+ * and job base pointer) are cleared first so the cascade delete cannot stall.
+ */
+export async function deleteOwnedProject(
+  ownerId: string,
+  projectId: string,
+): Promise<DeleteOwnedProjectResult> {
+  return getDb().transaction(async (transaction) => {
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${projectId}))`,
+    );
+
+    const [project] = await transaction
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.ownerId, ownerId)))
+      .limit(1);
+    if (!project) {
+      return "not found";
+    }
+
+    const [active] = await transaction
+      .select({ id: generationJobs.id })
+      .from(generationJobs)
+      .where(
+        and(
+          eq(generationJobs.projectId, projectId),
+          inArray(generationJobs.status, [...ACTIVE_GENERATION_STATUSES]),
+        ),
+      )
+      .limit(1);
+    if (active) {
+      return "active";
+    }
+
+    await transaction
+      .update(projects)
+      .set({ activeArtifactVersionId: null, updatedAt: new Date() })
+      .where(eq(projects.id, projectId));
+    await transaction
+      .update(buildRequests)
+      .set({ baseVersionId: null })
+      .where(eq(buildRequests.projectId, projectId));
+    await transaction
+      .update(generationJobs)
+      .set({ baseVersionId: null })
+      .where(eq(generationJobs.projectId, projectId));
+
+    await transaction
+      .delete(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.ownerId, ownerId)));
+
+    return "deleted";
+  });
 }

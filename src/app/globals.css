@@ -60,6 +60,10 @@ button {
 }
 
 button:disabled {
+  cursor: default;
+}
+
+button[aria-busy="true"] {
   cursor: wait;
 }
 

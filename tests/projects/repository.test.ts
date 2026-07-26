@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  deleteOwnedProject,
   getInitialProjectName,
   normalizeBuildRequest,
   retryOwnedGeneration,
@@ -21,6 +22,49 @@ function latestJobQuery(job: { buildRequestId: string; projectId: string; baseVe
   const innerJoin = vi.fn().mockReturnValue({ where });
   const from = vi.fn().mockReturnValue({ innerJoin });
   return { select: vi.fn().mockReturnValue({ from }) };
+}
+
+function deleteOwnedProjectHarness(options: { found: boolean; active: boolean }) {
+  const operations: string[] = [];
+  let selectCount = 0;
+  const transaction = {
+    execute: vi.fn(async () => {
+      operations.push("lock");
+    }),
+    select: vi.fn(() => {
+      selectCount += 1;
+      const isFirst = selectCount === 1;
+      const rows = isFirst
+        ? options.found
+          ? [{ id: "project-1", activeArtifactVersionId: "version-1" }]
+          : []
+        : options.active
+          ? [{ id: "job-1" }]
+          : [];
+      const limit = vi.fn(async () => rows);
+      const where = vi.fn(() => ({
+        limit,
+        orderBy: vi.fn(() => ({ limit })),
+      }));
+      return { from: vi.fn(() => ({ where })) };
+    }),
+    update: vi.fn(() => ({
+      set: vi.fn(() => ({
+        where: vi.fn(async () => {
+          operations.push("clear");
+        }),
+      })),
+    })),
+    delete: vi.fn(() => ({
+      where: vi.fn(async () => {
+        operations.push("delete");
+      }),
+    })),
+  };
+  mockedGetDb.mockReturnValue({
+    transaction: vi.fn((callback) => callback(transaction)),
+  } as never);
+  return { operations, transaction };
 }
 
 beforeEach(() => {
@@ -100,5 +144,50 @@ describe("project request contracts", () => {
       "request-1",
       "version-1",
     );
+  });
+});
+
+describe("owned project deletion", () => {
+  it("deletes an inactive owned project under one project lock and clears the active version", async () => {
+    const harness = deleteOwnedProjectHarness({ found: true, active: false });
+
+    await expect(
+      deleteOwnedProject("owner-1", "project-1"),
+    ).resolves.toBe("deleted");
+
+    expect(harness.operations).toEqual([
+      "lock",
+      "clear",
+      "clear",
+      "clear",
+      "delete",
+    ]);
+    expect(harness.transaction.execute).toHaveBeenCalledTimes(1);
+    expect(harness.transaction.update).toHaveBeenCalledTimes(3);
+    expect(harness.transaction.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects deletion and leaves the project intact while a generation job is active", async () => {
+    const harness = deleteOwnedProjectHarness({ found: true, active: true });
+
+    await expect(
+      deleteOwnedProject("owner-1", "project-1"),
+    ).resolves.toBe("active");
+
+    expect(harness.operations).toEqual(["lock"]);
+    expect(harness.transaction.update).not.toHaveBeenCalled();
+    expect(harness.transaction.delete).not.toHaveBeenCalled();
+  });
+
+  it("reports not found when the owner does not own the project", async () => {
+    const harness = deleteOwnedProjectHarness({ found: false, active: false });
+
+    await expect(
+      deleteOwnedProject("owner-1", "project-1"),
+    ).resolves.toBe("not found");
+
+    expect(harness.operations).toEqual(["lock"]);
+    expect(harness.transaction.select).toHaveBeenCalledTimes(1);
+    expect(harness.transaction.delete).not.toHaveBeenCalled();
   });
 });

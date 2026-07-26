@@ -22,6 +22,14 @@ import {
 } from "@/lib/projects/repository";
 import { runGenerationJob } from "@/lib/generation/worker";
 
+// `after()` from next/server must run its callback after the response. In a unit
+// test there is no Next runtime, so capture scheduled callbacks and let each
+// test flush them to prove the response resolved before the worker ran.
+const afterState = vi.hoisted(() => ({
+  after: vi.fn(),
+  callbacks: [] as Array<() => unknown>,
+}));
+
 vi.mock("@/lib/auth/session", () => ({ getCurrentUser: vi.fn() }));
 vi.mock("@/lib/generation/repository", () => ({
   cancelOwnedGeneration: vi.fn(),
@@ -36,6 +44,22 @@ vi.mock("@/lib/projects/repository", () => ({
 }));
 vi.mock("@/lib/generation/worker", () => ({ runGenerationJob: vi.fn() }));
 
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal() as typeof import("next/server");
+  return {
+    ...actual,
+    after(callback: () => unknown) {
+      afterState.after(callback);
+      afterState.callbacks.push(callback);
+    },
+  };
+});
+
+function flushAfterCallbacks(): Promise<unknown[]> {
+  const callbacks = afterState.callbacks.splice(0);
+  return Promise.all(callbacks.map((callback) => callback()));
+}
+
 const owner = {
   createdAt: new Date("2026-07-26T00:00:00.000Z"),
   id: "owner-1",
@@ -46,6 +70,7 @@ const context = { params: Promise.resolve({ projectId: "project-1", versionId: "
 
 beforeEach(() => {
   vi.clearAllMocks();
+  afterState.callbacks.length = 0;
   vi.mocked(getCurrentUser).mockResolvedValue(owner);
 });
 
@@ -71,7 +96,7 @@ describe("version API contracts", () => {
     });
   });
 
-  it("creates a follow-up through one owner-scoped request-and-job seam", async () => {
+  it("schedules the follow-up worker after the response and returns the queued snapshot immediately", async () => {
     vi.mocked(createOwnedFollowUpGeneration).mockResolvedValue({
       buildRequest: { baseVersionId: "11111111-1111-4111-8111-111111111111", content: "Celebrate it", createdAt: new Date(), id: "request-2", projectId: "project-1" },
       job: { id: "job-2" } as never,
@@ -91,10 +116,16 @@ describe("version API contracts", () => {
       "Celebrate it",
       "11111111-1111-4111-8111-111111111111",
     );
+    // The response resolved before any DeepSeek work ran.
+    expect(runGenerationJob).not.toHaveBeenCalled();
+    expect(getOwnedGenerationSnapshot).toHaveBeenCalledWith("owner-1", "project-1");
+    expect(afterState.after).toHaveBeenCalledTimes(1);
+
+    await flushAfterCallbacks();
     expect(runGenerationJob).toHaveBeenCalledWith("job-2");
   });
 
-  it("keeps the retry request alive until the generation worker finishes", async () => {
+  it("schedules the retry worker after the response and returns the queued snapshot immediately", async () => {
     vi.mocked(retryOwnedGeneration).mockResolvedValue({ id: "job-retry" } as never);
     vi.mocked(getOwnedGenerationSnapshot).mockResolvedValue({
       artifactVersion: null,
@@ -102,35 +133,20 @@ describe("version API contracts", () => {
       job: null,
       versions: [],
     });
-    let finishWorker: (() => void) | undefined;
-    vi.mocked(runGenerationJob).mockReturnValue(
-      new Promise<void>((resolve) => {
-        finishWorker = resolve;
-      }),
-    );
 
-    const responsePromise = retryGeneration(
+    const response = await retryGeneration(
       new Request("http://localhost", { method: "POST" }),
       { params: Promise.resolve({ projectId: "project-1" }) },
     );
-    const beforeWorkerFinished = await Promise.race([
-      responsePromise.then(() => "resolved"),
-      new Promise<"waiting">((resolve) => {
-        setTimeout(() => resolve("waiting"), 10);
-      }),
-    ]);
-
-    expect(beforeWorkerFinished).toBe("waiting");
-    expect(getOwnedGenerationSnapshot).not.toHaveBeenCalled();
-    finishWorker?.();
-    const response = await responsePromise;
 
     expect(response.status).toBe(202);
+    // The response resolved before any DeepSeek work ran.
+    expect(runGenerationJob).not.toHaveBeenCalled();
+    expect(getOwnedGenerationSnapshot).toHaveBeenCalledWith("owner-1", "project-1");
+    expect(afterState.after).toHaveBeenCalledTimes(1);
+
+    await flushAfterCallbacks();
     expect(runGenerationJob).toHaveBeenCalledWith("job-retry");
-    expect(getOwnedGenerationSnapshot).toHaveBeenCalledWith(
-      "owner-1",
-      "project-1",
-    );
   });
 
   it("does not expose a version outside the authenticated owner's Project", async () => {

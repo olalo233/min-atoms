@@ -27,7 +27,7 @@ const stageLabels: Record<string, string> = {
 
 const activeStatuses = new Set<string>(ACTIVE_GENERATION_STATUSES);
 
-const POLL_INTERVAL_MS = 500;
+const POLL_INTERVAL_MS = 1_200;
 
 function getStageLabel(stage: string) {
   return stageLabels[stage] ?? stage.replaceAll("_", " ");
@@ -138,6 +138,7 @@ export function GenerationPanel({
           return;
         }
         const next = (await response.json()) as GenerationSnapshot;
+        setError(null);
         startTransition(() => {
           setGeneration(next);
           setDisplayArtifact((current) =>

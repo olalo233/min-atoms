@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getCurrentUser } from "@/lib/auth/session";
@@ -31,7 +31,8 @@ export async function POST(request: Request, context: RouteContext) {
       payload.data.baseVersionId,
     );
     if (!created) return NextResponse.json({ error: "Project not found." }, { status: 404 });
-    await runGenerationJob(created.job.id);
+    // Respond before the worker runs; `after()` keeps the serverless work alive.
+    after(() => runGenerationJob(created.job.id));
     const snapshot = await getOwnedGenerationSnapshot(user.id, projectId);
     return NextResponse.json(snapshot, { status: 202 });
   } catch (error) {

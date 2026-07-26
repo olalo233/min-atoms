@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { deterministicProvider } from "@/lib/generation/provider";
+import { validateArtifactSmoke } from "@/lib/generation/smoke";
 import { validateArtifact } from "@/lib/generation/validator";
 
 describe("deterministic artifact contract", () => {
@@ -42,6 +43,15 @@ describe("deterministic artifact contract", () => {
 
     expect(artifact["index.html"]).not.toContain("<script>alert(1)</script>");
     expect(artifact["index.html"]).toContain("&lt;script&gt;");
+  });
+
+  it("accepts the deterministic programmer calculator interaction", async () => {
+    const artifact = await deterministicProvider.generate({
+      baseArtifact: null,
+      buildRequest: "Build a programmer calculator",
+    });
+
+    await expect(validateArtifactSmoke(validateArtifact(artifact))).resolves.toBeUndefined();
   });
 
   it("rejects forbidden network capabilities and malformed JavaScript", () => {

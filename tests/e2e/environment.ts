@@ -20,6 +20,7 @@ export function getE2eEnvironment(): Record<string, string> {
     DATABASE_URL: getLocalDatabaseUrl(),
     DEMO_PASSWORD: process.env.E2E_DEMO_PASSWORD ?? "min-atoms-demo",
     DEMO_USERNAME: process.env.E2E_DEMO_USERNAME ?? "demo",
+    DETERMINISTIC_GENERATION_DELAY_MS: "1500",
     GENERATION_PROVIDER: "deterministic",
     SESSION_SECRET:
       process.env.E2E_SESSION_SECRET ??

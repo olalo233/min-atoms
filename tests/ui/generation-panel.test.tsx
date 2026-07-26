@@ -269,7 +269,7 @@ describe("GenerationPanel", () => {
     );
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(1_200);
     });
 
     expect(screen.getByTestId("preview-frame")).toHaveTextContent("version-2");
@@ -309,11 +309,13 @@ describe("GenerationPanel", () => {
     });
     await act(async () => {
       fireEvent(document, new Event("visibilitychange"));
+      await Promise.resolve();
+      await Promise.resolve();
     });
     expect(fetchMock).toHaveBeenCalledWith("/api/projects/project-1/generation", {
       cache: "no-store",
     });
-    expect(await screen.findByRole("status")).toHaveTextContent("Preview ready");
+    expect(screen.getByRole("status")).toHaveTextContent("Preview ready");
   });
 
   it("stops the active agent and explains the cancelled state", async () => {
