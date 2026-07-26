@@ -1,0 +1,218 @@
+import { and, desc, eq, inArray } from "drizzle-orm";
+
+import {
+  buildRequests,
+  generationEvents,
+  generationJobs,
+  projects,
+  artifactVersions,
+  type BuildRequest,
+  type Project,
+} from "@/db/schema";
+import { getDb } from "@/lib/db/client";
+import { createGenerationJob } from "@/lib/generation/repository";
+import { ACTIVE_GENERATION_STATUSES } from "@/lib/generation/types";
+import { runGenerationJob } from "@/lib/generation/worker";
+
+const PROJECT_NAME_LIMIT = 72;
+
+export function normalizeBuildRequest(value: string): string {
+  return value.trim();
+}
+
+export function getInitialProjectName(buildRequest: string): string {
+  const normalized = normalizeBuildRequest(buildRequest).replace(/\s+/g, " ");
+  const summary = normalized.slice(0, PROJECT_NAME_LIMIT);
+  return `Project: ${summary}`;
+}
+
+export async function createProjectWithBuildRequest(
+  ownerId: string,
+  rawBuildRequest: string,
+): Promise<{ project: Project; buildRequest: BuildRequest }> {
+  const content = normalizeBuildRequest(rawBuildRequest);
+  if (!content) {
+    throw new Error("Build request cannot be empty.");
+  }
+
+  const result = await getDb().transaction(async (transaction) => {
+    const [project] = await transaction
+      .insert(projects)
+      .values({
+        ownerId,
+        name: getInitialProjectName(content),
+      })
+      .returning();
+
+    const [buildRequest] = await transaction
+      .insert(buildRequests)
+      .values({ projectId: project.id, content })
+      .returning();
+
+    return { project, buildRequest };
+  });
+
+  const job = await createGenerationJob(result.project.id, result.buildRequest.id);
+  void runGenerationJob(job.id);
+  return result;
+}
+
+export async function listOwnedProjects(ownerId: string): Promise<Project[]> {
+  return getDb()
+    .select()
+    .from(projects)
+    .where(eq(projects.ownerId, ownerId))
+    .orderBy(desc(projects.updatedAt));
+}
+
+export async function createOwnedFollowUpGeneration(
+  ownerId: string,
+  projectId: string,
+  rawBuildRequest: string,
+  baseVersionId: string,
+): Promise<{ buildRequest: BuildRequest; job: typeof generationJobs.$inferSelect } | null> {
+  const content = normalizeBuildRequest(rawBuildRequest);
+  if (!content) throw new Error("Build request cannot be empty.");
+
+  try {
+    return await getDb().transaction(async (transaction) => {
+      const [project] = await transaction
+        .select({ id: projects.id })
+        .from(projects)
+        .where(and(eq(projects.id, projectId), eq(projects.ownerId, ownerId)))
+        .limit(1);
+      if (!project) return null;
+
+      const [active] = await transaction
+        .select({ buildRequest: buildRequests, job: generationJobs })
+        .from(generationJobs)
+        .innerJoin(buildRequests, eq(generationJobs.buildRequestId, buildRequests.id))
+        .where(and(
+          eq(generationJobs.projectId, projectId),
+          inArray(generationJobs.status, [...ACTIVE_GENERATION_STATUSES]),
+        ))
+        .orderBy(desc(generationJobs.createdAt))
+        .limit(1);
+      if (active) return active;
+
+      const [baseVersion] = await transaction
+        .select({ id: artifactVersions.id })
+        .from(artifactVersions)
+        .where(and(
+          eq(artifactVersions.id, baseVersionId),
+          eq(artifactVersions.projectId, projectId),
+        ))
+        .limit(1);
+      if (!baseVersion) throw new Error("Base Version not found.");
+
+      const [failedAttempt] = await transaction
+        .select({ buildRequest: buildRequests })
+        .from(generationJobs)
+        .innerJoin(buildRequests, eq(generationJobs.buildRequestId, buildRequests.id))
+        .where(and(
+          eq(generationJobs.projectId, projectId),
+          eq(generationJobs.status, "failed"),
+          eq(buildRequests.baseVersionId, baseVersionId),
+          eq(buildRequests.content, content),
+        ))
+        .orderBy(desc(generationJobs.createdAt))
+        .limit(1);
+      if (failedAttempt) {
+        const [job] = await transaction
+          .insert(generationJobs)
+          .values({
+            baseVersionId,
+            buildRequestId: failedAttempt.buildRequest.id,
+            projectId,
+            status: "queued",
+          })
+          .returning();
+        await transaction.insert(generationEvents).values({
+          jobId: job.id,
+          message: "Generation queued.",
+          sequence: 1,
+          stage: "queued",
+        });
+        return { buildRequest: failedAttempt.buildRequest, job };
+      }
+
+      const [buildRequest] = await transaction
+        .insert(buildRequests)
+        .values({ baseVersionId, content, projectId })
+        .returning();
+      const [job] = await transaction
+        .insert(generationJobs)
+        .values({ baseVersionId, buildRequestId: buildRequest.id, projectId, status: "queued" })
+        .returning();
+      await transaction.insert(generationEvents).values({
+        jobId: job.id,
+        message: "Generation queued.",
+        sequence: 1,
+        stage: "queued",
+      });
+      await transaction
+        .update(projects)
+        .set({ updatedAt: new Date() })
+        .where(eq(projects.id, projectId));
+      return { buildRequest, job };
+    });
+  } catch (error) {
+    const [active] = await getDb()
+      .select({ buildRequest: buildRequests, job: generationJobs })
+      .from(generationJobs)
+      .innerJoin(buildRequests, eq(generationJobs.buildRequestId, buildRequests.id))
+      .innerJoin(projects, eq(generationJobs.projectId, projects.id))
+      .where(and(
+        eq(generationJobs.projectId, projectId),
+        eq(projects.ownerId, ownerId),
+        inArray(generationJobs.status, [...ACTIVE_GENERATION_STATUSES]),
+      ))
+      .orderBy(desc(generationJobs.createdAt))
+      .limit(1);
+    if (active) return active;
+    throw error;
+  }
+}
+
+export async function retryOwnedGeneration(
+  ownerId: string,
+  projectId: string,
+) {
+  const [latest] = await getDb()
+    .select({ job: generationJobs })
+    .from(generationJobs)
+    .innerJoin(projects, eq(generationJobs.projectId, projects.id))
+    .where(and(eq(projects.id, projectId), eq(projects.ownerId, ownerId)))
+    .orderBy(desc(generationJobs.createdAt))
+    .limit(1);
+  if (!latest) return null;
+
+  // A generation endpoint is safe to repeat while a job is queued, running, or
+  // already complete. Only a failed or cancelled latest job is retryable;
+  // creating a second job after completion would create another Artifact
+  // Version for the same request.
+  if (latest.job.status !== "failed" && latest.job.status !== "cancelled") {
+    return latest.job;
+  }
+
+  return createGenerationJob(
+    latest.job.projectId,
+    latest.job.buildRequestId,
+    latest.job.baseVersionId,
+  );
+}
+
+export async function getOwnedProject(
+  ownerId: string,
+  projectId: string,
+): Promise<{ project: Project; buildRequest: BuildRequest } | null> {
+  const result = await getDb()
+    .select({ project: projects, buildRequest: buildRequests })
+    .from(projects)
+    .innerJoin(buildRequests, eq(buildRequests.projectId, projects.id))
+    .where(and(eq(projects.ownerId, ownerId), eq(projects.id, projectId)))
+    .orderBy(buildRequests.createdAt)
+    .limit(1);
+
+  return result[0] ?? null;
+}

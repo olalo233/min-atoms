@@ -34,6 +34,10 @@ settings.local.json
 # Generated and local files.
 .DS_Store
 node_modules/
+.next/
 dist/
 build/
 coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo

@@ -1,0 +1,133 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { getDb } from "@/lib/db/client";
+import {
+  claimGenerationJob,
+  createGenerationJob,
+  updateGenerationStatus,
+} from "@/lib/generation/repository";
+
+vi.mock("@/lib/db/client", () => ({ getDb: vi.fn() }));
+
+const mockedGetDb = vi.mocked(getDb);
+
+function transitionHarness(updateWins: boolean) {
+  const operations: string[] = [];
+  let selectCount = 0;
+  const transaction = {
+    execute: vi.fn(async () => {
+      operations.push("lock");
+    }),
+    insert: vi.fn(() => ({
+      values: vi.fn(async (value: { stage: string }) => {
+        operations.push(`event:${value.stage}`);
+      }),
+    })),
+    select: vi.fn(() => {
+      selectCount += 1;
+      if (selectCount === 1) {
+        return {
+          from: vi.fn(() => ({
+            where: vi.fn(() => ({
+              limit: vi.fn(async () => [{ projectId: "project-1" }]),
+            })),
+          })),
+        };
+      }
+      return {
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            orderBy: vi.fn(() => ({
+              limit: vi.fn(async () => [{ sequence: 3 }]),
+            })),
+          })),
+        })),
+      };
+    }),
+    update: vi.fn(() => ({
+      set: vi.fn(() => ({
+        where: vi.fn(() => ({
+          returning: vi.fn(async () => {
+            operations.push("status");
+            return updateWins ? [{ id: "job-1" }] : [];
+          }),
+        })),
+      })),
+    })),
+  };
+  mockedGetDb.mockReturnValue({
+    transaction: vi.fn((callback) => callback(transaction)),
+  } as never);
+  return { operations, transaction };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("generation status and event serialization", () => {
+  it("creates the queued job and first event inside one project-locked transaction", async () => {
+    const operations: string[] = [];
+    let insertCount = 0;
+    const transaction = {
+      execute: vi.fn(async () => {
+        operations.push("lock");
+      }),
+      insert: vi.fn(() => {
+        insertCount += 1;
+        if (insertCount === 1) {
+          return {
+            values: vi.fn(() => ({
+              onConflictDoNothing: vi.fn(() => ({
+                returning: vi.fn(async () => {
+                  operations.push("job:queued");
+                  return [{ id: "job-1", status: "queued" }];
+                }),
+              })),
+            })),
+          };
+        }
+        return {
+          values: vi.fn(async (value: { stage: string }) => {
+            operations.push(`event:${value.stage}`);
+          }),
+        };
+      }),
+    };
+    mockedGetDb.mockReturnValue({
+      transaction: vi.fn((callback) => callback(transaction)),
+    } as never);
+
+    await expect(
+      createGenerationJob("project-1", "request-1"),
+    ).resolves.toMatchObject({ id: "job-1", status: "queued" });
+
+    expect(operations).toEqual(["lock", "job:queued", "event:queued"]);
+    expect(transaction.insert).toHaveBeenCalledTimes(2);
+  });
+
+  it("persists a claimed status and its event under one project lock", async () => {
+    const harness = transitionHarness(true);
+
+    await expect(claimGenerationJob("job-1")).resolves.toBe(true);
+
+    expect(harness.operations).toEqual(["lock", "status", "event:planning"]);
+    expect(harness.transaction.insert).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not append a later worker event when cancellation wins the expected-state check", async () => {
+    const harness = transitionHarness(false);
+
+    await expect(
+      updateGenerationStatus(
+        "job-1",
+        "planning",
+        "generating",
+        "Generating the constrained four-file artifact.",
+      ),
+    ).resolves.toBe(false);
+
+    expect(harness.operations).toEqual(["lock", "status"]);
+    expect(harness.transaction.insert).not.toHaveBeenCalled();
+  });
+});
