@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 
 import { PreviewFrame } from "@/components/preview/preview-frame";
 import {
@@ -26,6 +26,8 @@ const stageLabels: Record<string, string> = {
 };
 
 const activeStatuses = new Set<string>(ACTIVE_GENERATION_STATUSES);
+
+const POLL_INTERVAL_MS = 500;
 
 function getStageLabel(stage: string) {
   return stageLabels[stage] ?? stage.replaceAll("_", " ");
@@ -111,6 +113,7 @@ export function GenerationPanel({
   const [generation, setGeneration] = useState(initialGeneration);
   const [displayArtifact, setDisplayArtifact] = useState(initialGeneration.artifactVersion);
   const [isStarting, setIsStarting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const [isFollowingUp, setIsFollowingUp] = useState(false);
   const [followUp, setFollowUp] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -123,7 +126,10 @@ export function GenerationPanel({
       return;
     }
 
-    const timer = window.setInterval(async () => {
+    let stopped = false;
+    let timer: number | undefined;
+
+    async function refresh() {
       try {
         const response = await fetch(`/api/projects/${projectId}/generation`, {
           cache: "no-store",
@@ -132,18 +138,56 @@ export function GenerationPanel({
           return;
         }
         const next = (await response.json()) as GenerationSnapshot;
-        setGeneration(next);
-        setDisplayArtifact((current) =>
-          next.job?.status === "completed"
-            ? next.artifactVersion
-            : current ?? next.artifactVersion,
-        );
+        startTransition(() => {
+          setGeneration(next);
+          setDisplayArtifact((current) =>
+            next.job?.status === "completed"
+              ? next.artifactVersion
+              : current ?? next.artifactVersion,
+          );
+        });
       } catch {
         setError("Progress could not be refreshed. The persisted timeline is safe.");
       }
-    }, 500);
+    }
 
-    return () => window.clearInterval(timer);
+    function scheduleNext() {
+      timer = window.setTimeout(() => {
+        if (stopped) {
+          return;
+        }
+        if (document.visibilityState !== "visible") {
+          // Polling pauses while the tab is hidden; the visibilitychange
+          // listener below resumes it when the workspace is visible again.
+          return;
+        }
+        void refresh().then(() => {
+          if (!stopped) {
+            scheduleNext();
+          }
+        });
+      }, POLL_INTERVAL_MS);
+    }
+
+    function handleVisibilityChange() {
+      if (stopped || document.visibilityState !== "visible") {
+        return;
+      }
+      window.clearTimeout(timer);
+      void refresh().then(() => {
+        if (!stopped) {
+          scheduleNext();
+        }
+      });
+    }
+
+    scheduleNext();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [isActive, projectId]);
 
   async function startGeneration() {
@@ -164,6 +208,27 @@ export function GenerationPanel({
       setError("Generation could not start. Please try again.");
     } finally {
       setIsStarting(false);
+    }
+  }
+
+  async function stopGeneration() {
+    setError(null);
+    setIsStopping(true);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/generation`, {
+        method: "DELETE",
+      });
+      const body = (await response.json()) as GenerationSnapshot & { error?: string };
+      if (!response.ok) {
+        setError(body.error ?? "The agent could not be stopped. Try again.");
+        return;
+      }
+      setGeneration(body);
+      setDisplayArtifact((current) => current ?? body.artifactVersion);
+    } catch {
+      setError("The agent could not be stopped. Try again.");
+    } finally {
+      setIsStopping(false);
     }
   }
 
@@ -236,7 +301,6 @@ export function GenerationPanel({
       <div className="builder-grid">
         <aside className="evidence-column" aria-label="Build Request and generation evidence">
           <section className="request-panel" aria-labelledby="request-title">
-            <div className="panel-index" aria-hidden="true">01</div>
             <div>
               <p className="request-label" id="request-title">Build Request</p>
               <p className="request-content">{buildRequest}</p>
@@ -247,10 +311,10 @@ export function GenerationPanel({
             <div className="proof-heading">
               <div>
                 <p className="request-label">Persisted evidence</p>
-                <h3 id="proof-title">Generation proof rail</h3>
+                <h3 id="proof-title">Generation timeline</h3>
               </div>
               <span className="event-count">
-                {generation.events.length.toString().padStart(2, "0")} events
+                {generation.events.length} {generation.events.length === 1 ? "event" : "events"}
               </span>
             </div>
             <ol className="generation-timeline" aria-label="Generation progress">
@@ -271,7 +335,7 @@ export function GenerationPanel({
                       <span className="timeline-content">
                         <span className="timeline-label">
                           <strong>{getStageLabel(event.stage)}</strong>
-                          <small>Event {event.sequence.toString().padStart(2, "0")}</small>
+                          <small>Step {event.sequence}</small>
                         </span>
                         <span className="timeline-message">{event.message}</span>
                       </span>
@@ -297,36 +361,51 @@ export function GenerationPanel({
         </aside>
 
         <div className={`preview-panel state-${stateCopy.tone}`}>
-          <div
-            aria-atomic="true"
-            aria-live="polite"
-            className="job-state"
-            role="status"
-          >
-            <span className="status-signal" aria-hidden="true" />
-            <span>
+          <div className="job-state">
+            <span className="agent-pulse" aria-hidden="true">
+              <span className="agent-pulse-dot" />
+            </span>
+            <span
+              aria-atomic="true"
+              aria-live="polite"
+              className="job-state-copy"
+              role="status"
+            >
               <strong>{stateCopy.label}</strong>
               <small>{stateCopy.detail}</small>
             </span>
-            {showStartAction ? (
-              <button
-                aria-busy={isStarting}
-                className="primary-button"
-                disabled={isStarting}
-                onClick={startGeneration}
-                type="button"
-              >
-                {isStarting ? (
-                  <><span className="loading-mark" aria-hidden="true" />Queueing generation…</>
-                ) : status === "cancelled" ? (
-                  "Requeue generation"
-                ) : status === "failed" ? (
-                  "Retry generation"
-                ) : (
-                  "Generate first version"
-                )}
-              </button>
-            ) : null}
+            <span className="job-actions">
+              {isActive ? (
+                <button
+                  aria-busy={isStopping}
+                  className="quiet-button stop-button"
+                  disabled={isStopping}
+                  onClick={() => void stopGeneration()}
+                  type="button"
+                >
+                  {isStopping ? "Stopping…" : "Stop agent"}
+                </button>
+              ) : null}
+              {showStartAction ? (
+                <button
+                  aria-busy={isStarting}
+                  className="primary-button"
+                  disabled={isStarting}
+                  onClick={startGeneration}
+                  type="button"
+                >
+                  {isStarting ? (
+                    <><span className="loading-mark" aria-hidden="true" />Queueing generation…</>
+                  ) : status === "cancelled" ? (
+                    "Requeue generation"
+                  ) : status === "failed" ? (
+                    "Retry generation"
+                  ) : (
+                    "Generate first version"
+                  )}
+                </button>
+              ) : null}
+            </span>
           </div>
 
           {isRetryable ? (
@@ -385,8 +464,8 @@ export function GenerationPanel({
           ) : (
             <div className="preview-waiting" aria-hidden="true">
               <div className="waiting-register">
-                <span>PREVIEW / A-01</span>
-                <span>{isRetryable ? "NO ACCEPTED OUTPUT" : "AWAITING VALIDATED OUTPUT"}</span>
+                <span>Preview</span>
+                <span>{isRetryable ? "No accepted output" : "Awaiting validated output"}</span>
               </div>
               <div className="waiting-aperture">
                 <span className="waiting-mark" />

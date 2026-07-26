@@ -37,11 +37,11 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
       </header>
       <section className="project-heading" aria-labelledby="project-title">
         <div>
-          <p className="eyebrow">Active project / Artifact fabrication</p>
+          <p className="eyebrow">Project</p>
           <h1 id="project-title">{result.project.name}</h1>
         </div>
         <p className="project-status">
-          Build Request locked · Output constrained to four files
+          The agent works beside the live preview. Stop it anytime.
         </p>
       </section>
       <GenerationPanel

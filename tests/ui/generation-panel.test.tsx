@@ -60,6 +60,10 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: "visible",
+  });
 });
 
 describe("GenerationPanel", () => {
@@ -270,5 +274,128 @@ describe("GenerationPanel", () => {
 
     expect(screen.getByTestId("preview-frame")).toHaveTextContent("version-2");
     expect(screen.getByText("Artifact Version 2")).toBeVisible();
+  });
+
+  it("pauses progress polling while the tab is hidden and resumes on return", async () => {
+    vi.useFakeTimers();
+    const completedSnapshot = generationSnapshot("completed", { artifact: true });
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: vi.fn().mockResolvedValue(completedSnapshot),
+      ok: true,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GenerationPanel
+        buildRequest="Build a compact counter."
+        initialGeneration={generationSnapshot("generating")}
+        projectId="project-1"
+      />,
+    );
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    await act(async () => {
+      fireEvent(document, new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    await act(async () => {
+      fireEvent(document, new Event("visibilitychange"));
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/projects/project-1/generation", {
+      cache: "no-store",
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("Preview ready");
+  });
+
+  it("stops the active agent and explains the cancelled state", async () => {
+    const cancelledSnapshot = generationSnapshot("cancelled", {
+      events: [
+        {
+          createdAt: "2026-07-26T00:01:00.000Z",
+          id: "event-cancelled",
+          message: "Generation cancelled.",
+          sequence: 2,
+          stage: "cancelled",
+        },
+      ],
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: vi.fn().mockResolvedValue(cancelledSnapshot),
+      ok: true,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GenerationPanel
+        buildRequest="Build a compact counter."
+        initialGeneration={generationSnapshot("generating", {
+          events: [
+            {
+              createdAt: "2026-07-26T00:00:30.000Z",
+              id: "event-3",
+              message: "Generating the artifact files.",
+              sequence: 1,
+              stage: "generating",
+            },
+          ],
+        })}
+        projectId="project-1"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop agent" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/project-1/generation",
+        { method: "DELETE" },
+      );
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("Generation cancelled");
+    expect(screen.queryByRole("button", { name: "Stop agent" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Requeue generation" })).toBeVisible();
+  });
+
+  it("keeps the stop control hidden once the preview is ready", () => {
+    render(
+      <GenerationPanel
+        buildRequest="Build a compact counter."
+        initialGeneration={generationSnapshot("completed", { artifact: true })}
+        projectId="project-1"
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Preview ready");
+    expect(screen.queryByRole("button", { name: "Stop agent" })).not.toBeInTheDocument();
+  });
+
+  it("surfaces an honest error when the agent cannot be stopped", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: vi.fn().mockResolvedValue({ error: "Project not found." }),
+      ok: false,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GenerationPanel
+        buildRequest="Build a compact counter."
+        initialGeneration={generationSnapshot("generating")}
+        projectId="project-1"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop agent" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Project not found.");
+    expect(screen.getByRole("status")).toHaveTextContent("Generating");
   });
 });
