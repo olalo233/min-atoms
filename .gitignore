@@ -1,0 +1,39 @@
+# Local interview materials, planning, reviews, and agent harness.
+.private/
+.agents/
+.claude/
+.codex/
+.local-harness/
+.local-hooks/
+.worktrees/
+.scratch/
+.jj/
+AGENTS.md
+CLAUDE.md
+CONTEXT.md
+docs/
+specs/
+reviews/
+review/
+*review-report*
+*.md
+!README.md
+
+# Secrets and machine-local configuration.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+secrets.json
+settings.local.json
+
+# Generated and local files.
+.DS_Store
+node_modules/
+dist/
+build/
+coverage/
