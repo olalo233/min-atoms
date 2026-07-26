@@ -51,7 +51,34 @@ describe("artifact smoke validation", () => {
     };
 
     await expect(validateArtifactSmoke(files)).rejects.toThrow(
-      "Artifact smoke script could not execute safely.",
+      "Artifact smoke script failed: interrupted",
+    );
+  });
+
+  it("runs a DOMContentLoaded wrapper before the declared interaction", async () => {
+    const files = {
+      ...(await validFiles()),
+      "app.js": `
+        document.addEventListener("DOMContentLoaded", () => {
+          const count = document.querySelector("#count");
+          document.querySelector("#increment").addEventListener("click", () => {
+            count.textContent = "1";
+          });
+        });
+      `,
+    };
+
+    await expect(validateArtifactSmoke(files)).resolves.toBeUndefined();
+  });
+
+  it("returns an actionable diagnostic for an undeclared runtime global", async () => {
+    const files = {
+      ...(await validFiles()),
+      "app.js": "marked.parse('# title');",
+    };
+
+    await expect(validateArtifactSmoke(files)).rejects.toThrow(
+      /Artifact smoke script failed:.*marked.*not defined/i,
     );
   });
 

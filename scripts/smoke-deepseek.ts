@@ -11,7 +11,8 @@ async function main() {
     return;
   }
 
-  const request = "Build a counter with one button and visible result.";
+  const request = process.argv.slice(2).join(" ").trim()
+    || "Build a counter with one button and visible result.";
   const input = { baseArtifact: null, buildRequest: request };
   let artifact = await deepSeekProvider.generate(input);
   try {

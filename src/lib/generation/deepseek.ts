@@ -40,6 +40,9 @@ function artifactInstruction(
     "Return only a JSON object with exactly these string keys: index.html, styles.css, app.js, manifest.json.",
     "index.html must be a body fragment only. Do not include html, head, base, link, style, script, iframe, form, object, embed, or meta tags, and do not use src or href attributes. The platform injects styles.css and app.js.",
     "Do not use Markdown fences, external URLs, network APIs, browser permissions, popups, downloads, forms, or navigation.",
+    "The artifact must be fully self-contained. Do not rely on undeclared globals, packages, CDNs, or third-party libraries such as marked.",
+    "app.js may use document.addEventListener for DOMContentLoaded, document.getElementById, document.querySelector with ID selectors, and element textContent, value, classList, and addEventListener. Keep the smoke interaction independent from optional presentation behavior.",
+    "When the Build Request mentions Markdown, render representative Markdown without external libraries; never assume a global Markdown parser exists.",
     'manifest.json must be a JSON-encoded string shaped exactly like {"entry":"index.html","smoke":{"selector":"#increment","action":"click","expect":{"selector":"#count","text":"1"}}}; both selectors must be IDs present in index.html, and clicking the first must make the second contain exactly the expected text.',
     input.baseArtifact
       ? `Base Version v${input.baseArtifact.version} artifact JSON: ${JSON.stringify(input.baseArtifact.files).slice(0, MAX_PROVIDER_RESPONSE_SIZE)}`

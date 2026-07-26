@@ -174,7 +174,7 @@ describe("generation worker", () => {
     expect(repository.updateGenerationStatus.mock.calls).toEqual([
       ["job-3", "planning", "generating", "Generating the constrained four-file artifact."],
       ["job-3", "generating", "validating", "Validating the exact artifact contract."],
-      ["job-3", "validating", "repairing", "Repairing one validation finding."],
+      ["job-3", "validating", "repairing", "Repairing validation finding 1 of 2."],
       ["job-3", "repairing", "validating", "Validating the repaired artifact."],
     ]);
     expect(repository.completeGenerationJob).toHaveBeenCalledWith(
@@ -185,7 +185,67 @@ describe("generation worker", () => {
     expect(repository.failGenerationJob).not.toHaveBeenCalled();
   });
 
-  it("fails safely after one permanently invalid repair without replacing an artifact", async () => {
+  it("uses the second validation finding for one final bounded repair", async () => {
+    repository.claimGenerationJob.mockResolvedValue(true);
+    repository.getGenerationSnapshotForJob.mockResolvedValue({
+      artifactVersion: null,
+      events: [],
+      job: {
+        buildRequestId: "request-3b",
+        completedAt: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        errorMessage: null,
+        id: "job-3b",
+        projectId: "project-3b",
+        status: "planning",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+    repository.getGenerationInputForJob.mockResolvedValue({
+      baseArtifact: null,
+      buildRequest: "Render Markdown without external libraries",
+    });
+    const first = { ...files, "manifest.json": "{}" };
+    const second = { ...files, "app.js": "marked.parse('hello')" };
+    const provider: GenerationProvider = {
+      generate: vi.fn().mockResolvedValue(first),
+      repair: vi.fn()
+        .mockResolvedValueOnce(second)
+        .mockResolvedValueOnce(files),
+    };
+    smoke.validateArtifactSmoke
+      .mockRejectedValueOnce(new Error("undeclared runtime global"))
+      .mockResolvedValueOnce(undefined);
+
+    await runGenerationJob("job-3b", provider);
+
+    expect(provider.repair).toHaveBeenNthCalledWith(
+      1,
+      {
+        baseArtifact: null,
+        buildRequest: "Render Markdown without external libraries",
+      },
+      first,
+      "Artifact manifest must point to index.html.",
+    );
+    expect(provider.repair).toHaveBeenNthCalledWith(
+      2,
+      {
+        baseArtifact: null,
+        buildRequest: "Render Markdown without external libraries",
+      },
+      second,
+      "Artifact did not satisfy the required contract.",
+    );
+    expect(repository.completeGenerationJob).toHaveBeenCalledWith(
+      "job-3b",
+      "project-3b",
+      files,
+    );
+    expect(repository.failGenerationJob).not.toHaveBeenCalled();
+  });
+
+  it("fails safely after two permanently invalid repairs without replacing an artifact", async () => {
     repository.claimGenerationJob.mockResolvedValue(true);
     repository.getGenerationSnapshotForJob.mockResolvedValue({
       artifactVersion: null,
@@ -223,6 +283,7 @@ describe("generation worker", () => {
       "job-4",
       "artifact_invalid",
     );
-    expect(repository.updateGenerationStatus).toHaveBeenCalledTimes(4);
+    expect(provider.repair).toHaveBeenCalledTimes(2);
+    expect(repository.updateGenerationStatus).toHaveBeenCalledTimes(6);
   });
 });

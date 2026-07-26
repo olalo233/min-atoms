@@ -18,6 +18,7 @@ import {
 import { validateArtifactSmoke } from "@/lib/generation/smoke";
 
 const runningJobs = new Set<string>();
+const MAX_REPAIR_ATTEMPTS = 2;
 
 function getConfiguredProvider(): GenerationProvider {
   return process.env.GENERATION_PROVIDER === "deterministic"
@@ -63,34 +64,32 @@ export async function runGenerationJob(
     ))) {
       return;
     }
-    try {
-      await validateArtifactSmoke(validateArtifact(files));
-    } catch (error) {
-      const diagnostic = getValidationDiagnostic(error);
-      if (!provider.repair) {
-        throw new Error("artifact_invalid");
-      }
-      if (!(await updateGenerationStatus(
-        jobId,
-        "validating",
-        "repairing",
-        "Repairing one validation finding.",
-      ))) {
-        return;
-      }
-      files = await provider.repair(input, files, diagnostic);
-      if (!(await updateGenerationStatus(
-        jobId,
-        "repairing",
-        "validating",
-        "Validating the repaired artifact.",
-      ))) {
-        return;
-      }
+    for (let attempt = 0; ; attempt += 1) {
       try {
         await validateArtifactSmoke(validateArtifact(files));
-      } catch {
-        throw new Error("artifact_invalid");
+        break;
+      } catch (error) {
+        if (!provider.repair || attempt >= MAX_REPAIR_ATTEMPTS) {
+          throw new Error("artifact_invalid");
+        }
+        const diagnostic = getValidationDiagnostic(error);
+        if (!(await updateGenerationStatus(
+          jobId,
+          "validating",
+          "repairing",
+          `Repairing validation finding ${attempt + 1} of ${MAX_REPAIR_ATTEMPTS}.`,
+        ))) {
+          return;
+        }
+        files = await provider.repair(input, files, diagnostic);
+        if (!(await updateGenerationStatus(
+          jobId,
+          "repairing",
+          "validating",
+          "Validating the repaired artifact.",
+        ))) {
+          return;
+        }
       }
     }
     await completeGenerationJob(

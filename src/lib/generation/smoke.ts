@@ -116,6 +116,9 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
         querySelector(selector) {
           return selector.startsWith("#") ? (__nodes[selector.slice(1)] || null) : null;
         },
+        addEventListener(type, listener) {
+          if (type === "DOMContentLoaded") listener({ currentTarget: document, target: document });
+        },
       };
       const window = globalThis;
       window.document = document;
@@ -126,7 +129,24 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
         set: async () => true,
       };
     `;
-    context.unwrapResult(context.evalCode(`${prelude}\n${files["app.js"]}`)).dispose();
+    const evaluation = context.evalCode(`${prelude}\n${files["app.js"]}`);
+    const evaluationError = evaluation.error;
+    if (evaluationError) {
+      const dumped = context.dump(evaluationError) as {
+        message?: unknown;
+        name?: unknown;
+      };
+      evaluationError.dispose();
+      const detail = typeof dumped.message === "string"
+        ? dumped.message
+        : typeof dumped.name === "string"
+          ? dumped.name
+          : "unknown runtime error";
+      throw new SmokeExecutionFinding(
+        `Artifact smoke script failed: ${detail.slice(0, 120)}`,
+      );
+    }
+    context.unwrapResult(evaluation).dispose();
     runPendingJobs(runtime);
     context
       .unwrapResult(
