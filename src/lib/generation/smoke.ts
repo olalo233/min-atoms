@@ -33,16 +33,33 @@ function getElementText(html: string, id: string): string | null {
   return element ? decodeText(element[2]) : null;
 }
 
-function getElementSeed(html: string): Record<string, string> {
-  const seed: Record<string, string> = {};
-  const idPattern = /\bid=(?:"([^"]+)"|'([^']+)')/gi;
-  for (const match of html.matchAll(idPattern)) {
-    const id = match[1] ?? match[2];
-    if (id && !(id in seed)) {
-      seed[id] = getElementText(html, id) ?? "";
+type ElementSeed = {
+  attributes: Record<string, string>;
+  id: string | null;
+  tagName: string;
+  textContent: string;
+};
+
+function getElementSeeds(html: string): ElementSeed[] {
+  const seeds: ElementSeed[] = [];
+  const elementPattern = /<([A-Za-z][\w:-]*)\b([^>]*)>/g;
+  const attributePattern =
+    /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+  for (const elementMatch of html.matchAll(elementPattern)) {
+    const attributes: Record<string, string> = {};
+    for (const attributeMatch of elementMatch[2].matchAll(attributePattern)) {
+      attributes[attributeMatch[1].toLowerCase()] =
+        attributeMatch[2] ?? attributeMatch[3] ?? attributeMatch[4] ?? "";
     }
+    const id = attributes.id || null;
+    seeds.push({
+      attributes,
+      id,
+      tagName: elementMatch[1],
+      textContent: id ? (getElementText(html, id) ?? "") : "",
+    });
   }
-  return seed;
+  return seeds;
 }
 
 function runPendingJobs(runtime: QuickJSRuntime) {
@@ -90,16 +107,40 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
   const context = runtime.newContext();
 
   try {
-    const nodeSeed = JSON.stringify(getElementSeed(files["index.html"]));
+    const nodeSeed = JSON.stringify(getElementSeeds(files["index.html"]));
     const prelude = `
-      const __nodes = Object.fromEntries(
-        Object.entries(${nodeSeed}).map(([id, textContent]) => {
+      const __allNodes = ${nodeSeed}.map((seed) => {
           const listeners = Object.create(null);
+          const attributes = Object.assign(Object.create(null), seed.attributes);
+          const classes = new Set((attributes.class || "").split(/\\s+/).filter(Boolean));
+          const dataset = Object.create(null);
+          for (const [name, value] of Object.entries(attributes)) {
+            if (name.startsWith("data-")) {
+              dataset[name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
+            }
+          }
           const node = {
-            id,
-            textContent,
-            value: "",
-            classList: { add() {}, remove() {}, toggle() {} },
+            id: seed.id || "",
+            tagName: seed.tagName.toUpperCase(),
+            textContent: seed.textContent,
+            value: attributes.value || "",
+            dataset,
+            style: {},
+            classList: {
+              add(...names) { for (const name of names) classes.add(name); },
+              contains(name) { return classes.has(name); },
+              remove(...names) { for (const name of names) classes.delete(name); },
+              toggle(name) {
+                if (classes.has(name)) {
+                  classes.delete(name);
+                  return false;
+                }
+                classes.add(name);
+                return true;
+              },
+            },
+            getAttribute(name) { return attributes[name.toLowerCase()] ?? null; },
+            setAttribute(name, value) { attributes[name.toLowerCase()] = String(value); },
             addEventListener(type, listener) {
               (listeners[type] ||= []).push(listener);
             },
@@ -113,21 +154,34 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
                 preventDefault() {},
                 stopPropagation() {},
               };
-              if (typeof node.onclick === "function") node.onclick(event);
-              for (const listener of listeners.click || []) listener(event);
+              if (typeof node.onclick === "function") node.onclick.call(node, event);
+              for (const listener of listeners.click || []) listener.call(node, event);
             },
           };
-          return [id, node];
-        }),
+          return node;
+        });
+      const __nodes = Object.fromEntries(
+        __allNodes.filter((node) => node.id).map((node) => [node.id, node]),
       );
+      function __matches(node, selector) {
+        selector = selector.trim();
+        if (selector.startsWith("#")) return node.id === selector.slice(1);
+        if (selector.startsWith(".")) return node.classList.contains(selector.slice(1));
+        const attribute = /^\\[([\\w:-]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\\]]+)))?\\]$/.exec(selector);
+        if (attribute) {
+          const actual = node.getAttribute(attribute[1]);
+          const expected = attribute[2] ?? attribute[3] ?? attribute[4];
+          return expected === undefined ? actual !== null : actual === expected.trim();
+        }
+        return node.tagName.toLowerCase() === selector.toLowerCase();
+      }
       const document = {
         getElementById(id) { return __nodes[id] || null; },
         querySelector(selector) {
-          return selector.startsWith("#") ? (__nodes[selector.slice(1)] || null) : null;
+          return this.querySelectorAll(selector)[0] || null;
         },
         querySelectorAll(selector) {
-          const node = this.querySelector(selector);
-          return node ? [node] : [];
+          return __allNodes.filter((node) => __matches(node, selector));
         },
         addEventListener(type, listener) {
           if (type === "DOMContentLoaded") listener({ currentTarget: document, target: document });

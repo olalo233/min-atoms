@@ -74,14 +74,37 @@ describe("artifact smoke validation", () => {
   it("supports bounded querySelectorAll calls before the smoke interaction", async () => {
     const files = {
       ...(await validFiles()),
+      "index.html": `
+        <button class="calculator-key" data-value="1" id="increment">Increment</button>
+        <output id="count">0</output>
+      `,
       "app.js": `
         document.addEventListener("DOMContentLoaded", () => {
           document.querySelectorAll(".calculator-key").forEach((button) => {
-            button.addEventListener("click", () => {});
+            button.addEventListener("click", () => {
+              document.querySelector("[data-value='1']").textContent = "used";
+              document.querySelector("#count").textContent =
+                button.getAttribute("data-value");
+            });
           });
-          const count = document.querySelector("#count");
-          document.querySelector("#increment").addEventListener("click", () => {
-            count.textContent = "1";
+        });
+      `,
+    };
+
+    await expect(validateArtifactSmoke(files)).resolves.toBeUndefined();
+  });
+
+  it("binds event-listener this to the clicked element", async () => {
+    const files = {
+      ...(await validFiles()),
+      "index.html": `
+        <button class="calculator-key" data-value="1" id="increment">Increment</button>
+        <output id="count">0</output>
+      `,
+      "app.js": `
+        document.querySelectorAll(".calculator-key").forEach((button) => {
+          button.addEventListener("click", function () {
+            document.querySelector("#count").textContent = this.dataset.value;
           });
         });
       `,
