@@ -42,6 +42,8 @@ function artifactInstruction(
     "Do not use Markdown fences, external URLs, network APIs, browser permissions, popups, downloads, forms, or navigation.",
     "The artifact must be fully self-contained. Do not rely on undeclared globals, packages, CDNs, or third-party libraries such as marked.",
     "app.js may use document.addEventListener for DOMContentLoaded, document.getElementById, document.querySelector/querySelectorAll with simple ID, class, tag, or attribute selectors, and element textContent, value, dataset, style, classList, getAttribute/setAttribute, and addEventListener. Keep the smoke interaction independent from optional presentation behavior.",
+    "The smoke runtime seeds each element value only from that element's own HTML value attribute. It does not infer a select value from its selected option. Set every value needed by the smoke click explicitly in HTML or synchronously in app.js, and give calculations a safe operator fallback such as operator.value || '+'.",
+    "The smoke click must synchronously update the expected element. Do not make it depend on native form behavior, timers, animation events, layout measurements, or browser-only select defaults.",
     "When the Build Request mentions Markdown, render representative Markdown without external libraries; never assume a global Markdown parser exists.",
     'manifest.json must be a JSON-encoded string shaped exactly like {"entry":"index.html","smoke":{"selector":"#increment","action":"click","expect":{"selector":"#count","text":"1"}}}; both selectors must be IDs present in index.html, and clicking the first must make the second contain exactly the expected text.',
     input.baseArtifact

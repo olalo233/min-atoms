@@ -46,5 +46,8 @@ describe("DeepSeek artifact contract", () => {
     expect(instruction).toContain("Do not rely on undeclared globals");
     expect(instruction).toContain("Markdown");
     expect(instruction).toContain("without external libraries");
+    expect(instruction).toContain("does not infer a select value");
+    expect(instruction).toContain("operator.value || '+'");
+    expect(instruction).toContain("synchronously update the expected element");
   });
 });
