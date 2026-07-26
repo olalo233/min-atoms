@@ -71,6 +71,49 @@ describe("artifact smoke validation", () => {
     await expect(validateArtifactSmoke(files)).resolves.toBeUndefined();
   });
 
+  it("supports bounded querySelectorAll calls before the smoke interaction", async () => {
+    const files = {
+      ...(await validFiles()),
+      "app.js": `
+        document.addEventListener("DOMContentLoaded", () => {
+          document.querySelectorAll(".calculator-key").forEach((button) => {
+            button.addEventListener("click", () => {});
+          });
+          const count = document.querySelector("#count");
+          document.querySelector("#increment").addEventListener("click", () => {
+            count.textContent = "1";
+          });
+        });
+      `,
+    };
+
+    await expect(validateArtifactSmoke(files)).resolves.toBeUndefined();
+  });
+
+  it("seeds non-smoke ID elements used during application setup", async () => {
+    const files = {
+      ...(await validFiles()),
+      "index.html": `
+        <main>
+          <output id="display">0</output>
+          <button id="increment">Increment</button>
+          <output id="count">0</output>
+        </main>
+      `,
+      "app.js": `
+        document.addEventListener("DOMContentLoaded", () => {
+          document.getElementById("display").textContent = "READY";
+          const count = document.getElementById("count");
+          document.getElementById("increment").addEventListener("click", () => {
+            count.textContent = "1";
+          });
+        });
+      `,
+    };
+
+    await expect(validateArtifactSmoke(files)).resolves.toBeUndefined();
+  });
+
   it("returns an actionable diagnostic for an undeclared runtime global", async () => {
     const files = {
       ...(await validFiles()),

@@ -75,4 +75,34 @@ describe("deterministic artifact contract", () => {
       validateArtifact({ ...valid, "styles.css": "} .app {" }),
     ).toThrow("balanced blocks");
   });
+
+  it("allows class constructors while blocking constructor-chain escapes", () => {
+    const valid = {
+      "app.js": "class Calculator { constructor() { this.value = 0; } }",
+      "index.html": "<button id=\"go\">Go</button><output id=\"result\">0</output>",
+      "manifest.json": JSON.stringify({
+        entry: "index.html",
+        smoke: {
+          action: "click",
+          expect: { selector: "#result", text: "1" },
+          selector: "#go",
+        },
+      }),
+      "styles.css": ".app { color: black; }",
+    };
+
+    expect(validateArtifact(valid)).toEqual(valid);
+    expect(() =>
+      validateArtifact({
+        ...valid,
+        "app.js": "({}).constructor.constructor('return globalThis')()",
+      }),
+    ).toThrow("forbidden runtime escape");
+    expect(() =>
+      validateArtifact({
+        ...valid,
+        "app.js": "const escape = value['prototype'];",
+      }),
+    ).toThrow("forbidden runtime escape");
+  });
 });

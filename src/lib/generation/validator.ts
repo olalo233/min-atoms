@@ -16,7 +16,9 @@ const FORBIDDEN_CONTENT = [
 const FORBIDDEN_SCRIPT_CONTENT = [
   /\b(?:eval|process|require|module|global|Buffer)\b/i,
   /\bFunction\b/,
-  /\b(?:constructor|__proto__|prototype)\b/i,
+  /\b__proto__\b/i,
+  /\.\s*(?:constructor|prototype)\b/i,
+  /\[\s*["'](?:constructor|prototype|__proto__)["']\s*\]/i,
 ];
 
 export class ArtifactValidationError extends Error {

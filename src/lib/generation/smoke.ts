@@ -33,6 +33,18 @@ function getElementText(html: string, id: string): string | null {
   return element ? decodeText(element[2]) : null;
 }
 
+function getElementSeed(html: string): Record<string, string> {
+  const seed: Record<string, string> = {};
+  const idPattern = /\bid=(?:"([^"]+)"|'([^']+)')/gi;
+  for (const match of html.matchAll(idPattern)) {
+    const id = match[1] ?? match[2];
+    if (id && !(id in seed)) {
+      seed[id] = getElementText(html, id) ?? "";
+    }
+  }
+  return seed;
+}
+
 function runPendingJobs(runtime: QuickJSRuntime) {
   for (let iteration = 0; iteration < 16 && runtime.hasPendingJob(); iteration += 1) {
     const result = runtime.executePendingJobs();
@@ -78,10 +90,7 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
   const context = runtime.newContext();
 
   try {
-    const nodeSeed = JSON.stringify({
-      [actionId]: actionText,
-      [expectedId]: expectedText,
-    });
+    const nodeSeed = JSON.stringify(getElementSeed(files["index.html"]));
     const prelude = `
       const __nodes = Object.fromEntries(
         Object.entries(${nodeSeed}).map(([id, textContent]) => {
@@ -115,6 +124,10 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
         getElementById(id) { return __nodes[id] || null; },
         querySelector(selector) {
           return selector.startsWith("#") ? (__nodes[selector.slice(1)] || null) : null;
+        },
+        querySelectorAll(selector) {
+          const node = this.querySelector(selector);
+          return node ? [node] : [];
         },
         addEventListener(type, listener) {
           if (type === "DOMContentLoaded") listener({ currentTarget: document, target: document });
