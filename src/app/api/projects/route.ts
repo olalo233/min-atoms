@@ -1,11 +1,14 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getCurrentUser } from "@/lib/auth/session";
+import { runGenerationJob } from "@/lib/generation/worker";
 import {
   createProjectWithBuildRequest,
   listOwnedProjects,
 } from "@/lib/projects/repository";
+
+export const maxDuration = 120;
 
 const createProjectSchema = z.object({
   buildRequest: z.string().max(20_000),
@@ -55,5 +58,11 @@ export async function POST(request: Request) {
     user.id,
     parsed.data.buildRequest,
   );
-  return NextResponse.json(result, { status: 201 });
+  // Return immediately; the queued job is persisted, and the worker runs after
+  // the response through `after()` so the serverless invocation stays alive.
+  after(() => runGenerationJob(result.job.id));
+  return NextResponse.json(
+    { project: result.project, buildRequest: result.buildRequest },
+    { status: 201 },
+  );
 }
