@@ -69,9 +69,10 @@ repair attempt.
 
 Passwords are bcrypt-hashed with a salt. Sessions are opaque, HMAC-hashed,
 HttpOnly, SameSite cookies; login failures are generic and rate-limited. The
-Preview runs in a script-only sandbox with a restrictive CSP and no network
-access. Its narrow `postMessage` bridge validates source, project, artifact
-version, operation, keys, and values before accessing Project-scoped data.
+Preview runs in a script-only sandbox with a restrictive CSP: generated code
+has no network access, while the platform may load one approved CSS preset.
+Its narrow `postMessage` bridge validates source, project, artifact version,
+operation, keys, and values before accessing Project-scoped data.
 
 ## Scope, trade-offs, and next steps
 
@@ -88,3 +89,17 @@ covers login, v1, persisted counter data, v2, non-mutating version inspection,
 explicit restore, and reopening. Next priorities are a durable background
 worker for multi-process operation and production deployment configuration with
 managed secrets.
+
+### Generated UI presets
+
+The generation harness combines the runtime contract with versioned frontend
+design guidance. It asks the model to ground each interface in its subject,
+choose a distinctive visual direction, critique generic defaults, and preserve
+responsive, keyboard, and reduced-motion quality floors.
+
+Artifacts select one platform-controlled CSS preset in `manifest.json`:
+`min-atoms-base`, `pico-2`, or `bootstrap-5`. The Preview resolves that ID from
+an internal catalog and injects its fixed CDN stylesheet under a narrowly
+generated CSP. Generated HTML cannot provide URLs, `<link>` tags, remote
+scripts, or arbitrary packages. CSS presets improve the baseline without
+granting third-party JavaScript access to the sandbox or generated app data.
