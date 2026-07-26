@@ -19,4 +19,24 @@ REVOKE ALL ON TABLE "build_requests" FROM anon, authenticated;--> statement-brea
 REVOKE ALL ON TABLE "generation_jobs" FROM anon, authenticated;--> statement-breakpoint
 REVOKE ALL ON TABLE "generation_events" FROM anon, authenticated;--> statement-breakpoint
 REVOKE ALL ON TABLE "artifact_versions" FROM anon, authenticated;--> statement-breakpoint
-REVOKE ALL ON TABLE "generated_app_data" FROM anon, authenticated;
+REVOKE ALL ON TABLE "generated_app_data" FROM anon, authenticated;--> statement-breakpoint
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'min_atoms_app') THEN
+    CREATE ROLE min_atoms_app NOLOGIN;
+  END IF;
+END
+$$;--> statement-breakpoint
+GRANT USAGE ON SCHEMA public TO min_atoms_app;--> statement-breakpoint
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO min_atoms_app;--> statement-breakpoint
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO min_atoms_app;--> statement-breakpoint
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO min_atoms_app;--> statement-breakpoint
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO min_atoms_app;--> statement-breakpoint
+CREATE POLICY min_atoms_app_access ON "users" FOR ALL TO min_atoms_app USING (true) WITH CHECK (true);--> statement-breakpoint
+CREATE POLICY min_atoms_app_access ON "sessions" FOR ALL TO min_atoms_app USING (true) WITH CHECK (true);--> statement-breakpoint
+CREATE POLICY min_atoms_app_access ON "projects" FOR ALL TO min_atoms_app USING (true) WITH CHECK (true);--> statement-breakpoint
+CREATE POLICY min_atoms_app_access ON "build_requests" FOR ALL TO min_atoms_app USING (true) WITH CHECK (true);--> statement-breakpoint
+CREATE POLICY min_atoms_app_access ON "generation_jobs" FOR ALL TO min_atoms_app USING (true) WITH CHECK (true);--> statement-breakpoint
+CREATE POLICY min_atoms_app_access ON "generation_events" FOR ALL TO min_atoms_app USING (true) WITH CHECK (true);--> statement-breakpoint
+CREATE POLICY min_atoms_app_access ON "artifact_versions" FOR ALL TO min_atoms_app USING (true) WITH CHECK (true);--> statement-breakpoint
+CREATE POLICY min_atoms_app_access ON "generated_app_data" FOR ALL TO min_atoms_app USING (true) WITH CHECK (true);
