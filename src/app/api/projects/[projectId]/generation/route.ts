@@ -8,6 +8,8 @@ import {
 import { runGenerationJob } from "@/lib/generation/worker";
 import { retryOwnedGeneration } from "@/lib/projects/repository";
 
+export const maxDuration = 120;
+
 type GenerationRouteContext = {
   params: Promise<{ projectId: string }>;
 };
@@ -50,7 +52,7 @@ export async function POST(
   if (!job) {
     return NextResponse.json({ error: "Project not found." }, { status: 404 });
   }
-  void runGenerationJob(job.id);
+  await runGenerationJob(job.id);
   const snapshot = await getOwnedGenerationSnapshot(user.id, projectId);
   return NextResponse.json(snapshot, { status: 202 });
 }
