@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GET as getProject } from "@/app/api/projects/[projectId]/route";
+import { DELETE as deleteProject } from "@/app/api/projects/[projectId]/route";
 import { POST as createProject } from "@/app/api/projects/route";
 import { getCurrentUser } from "@/lib/auth/session";
 import {
   createProjectWithBuildRequest,
+  deleteOwnedProject,
   getOwnedProject,
 } from "@/lib/projects/repository";
 
@@ -16,11 +18,20 @@ vi.mock("@/lib/projects/repository", () => ({
   createProjectWithBuildRequest: vi.fn(),
   getOwnedProject: vi.fn(),
   listOwnedProjects: vi.fn(),
+  deleteOwnedProject: vi.fn(),
 }));
 
 const mockedGetCurrentUser = vi.mocked(getCurrentUser);
 const mockedCreateProject = vi.mocked(createProjectWithBuildRequest);
 const mockedGetOwnedProject = vi.mocked(getOwnedProject);
+const mockedDeleteOwnedProject = vi.mocked(deleteOwnedProject);
+
+const authenticatedOwner = {
+  id: "owner-2",
+  username: "other",
+  passwordHash: "unused",
+  createdAt: new Date(),
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -101,5 +112,67 @@ describe("project API boundaries", () => {
 
     expect(response.status).toBe(404);
     expect(mockedGetOwnedProject).toHaveBeenCalledWith("owner-2", "project-1");
+  });
+});
+
+describe("project deletion boundary", () => {
+  it("rejects deletion without an authenticated session", async () => {
+    mockedGetCurrentUser.mockResolvedValue(null);
+
+    const response = await deleteProject(
+      new Request("http://localhost", { method: "DELETE" }),
+      { params: Promise.resolve({ projectId: "project-1" }) },
+    );
+
+    expect(response.status).toBe(401);
+    expect(mockedDeleteOwnedProject).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when the owner has no matching project", async () => {
+    mockedGetCurrentUser.mockResolvedValue(authenticatedOwner);
+    mockedDeleteOwnedProject.mockResolvedValue("not found");
+
+    const response = await deleteProject(
+      new Request("http://localhost", { method: "DELETE" }),
+      { params: Promise.resolve({ projectId: "project-1" }) },
+    );
+
+    expect(response.status).toBe(404);
+    expect(mockedDeleteOwnedProject).toHaveBeenCalledWith(
+      "owner-2",
+      "project-1",
+    );
+  });
+
+  it("returns 409 and leaves the project intact while a generation job is active", async () => {
+    mockedGetCurrentUser.mockResolvedValue(authenticatedOwner);
+    mockedDeleteOwnedProject.mockResolvedValue("active");
+
+    const response = await deleteProject(
+      new Request("http://localhost", { method: "DELETE" }),
+      { params: Promise.resolve({ projectId: "project-1" }) },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.any(String),
+    });
+  });
+
+  it("deletes the inactive project and responds 204 with an empty body", async () => {
+    mockedGetCurrentUser.mockResolvedValue(authenticatedOwner);
+    mockedDeleteOwnedProject.mockResolvedValue("deleted");
+
+    const response = await deleteProject(
+      new Request("http://localhost", { method: "DELETE" }),
+      { params: Promise.resolve({ projectId: "project-1" }) },
+    );
+
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe("");
+    expect(mockedDeleteOwnedProject).toHaveBeenCalledWith(
+      "owner-2",
+      "project-1",
+    );
   });
 });

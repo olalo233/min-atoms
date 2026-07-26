@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import {
   buildRequests,
@@ -215,4 +215,56 @@ export async function getOwnedProject(
     .limit(1);
 
   return result[0] ?? null;
+}
+
+export type DeleteOwnedProjectResult = "deleted" | "active" | "not found";
+
+// Deletes a project the owner owns exactly. Holds a project-scoped advisory
+// lock for the whole transaction so concurrent generation workers cannot flip a
+// job active between our check and the delete. The project is rejected while any
+// generation job is still active; once clear, `activeArtifactVersionId` is
+// nulled so the cascade delete of the project is not blocked by its RESTRICT
+// reference to an artifact version that is about to be cascade-deleted too.
+export async function deleteOwnedProject(
+  ownerId: string,
+  projectId: string,
+): Promise<DeleteOwnedProjectResult> {
+  return getDb().transaction(async (transaction) => {
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${projectId}))`,
+    );
+
+    const [project] = await transaction
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.ownerId, ownerId)))
+      .limit(1);
+    if (!project) {
+      return "not found";
+    }
+
+    const [active] = await transaction
+      .select({ id: generationJobs.id })
+      .from(generationJobs)
+      .where(
+        and(
+          eq(generationJobs.projectId, projectId),
+          inArray(generationJobs.status, [...ACTIVE_GENERATION_STATUSES]),
+        ),
+      )
+      .orderBy(desc(generationJobs.createdAt))
+      .limit(1);
+    if (active) {
+      return "active";
+    }
+
+    await transaction
+      .update(projects)
+      .set({ activeArtifactVersionId: null })
+      .where(eq(projects.id, projectId));
+
+    await transaction.delete(projects).where(eq(projects.id, projectId));
+
+    return "deleted";
+  });
 }
