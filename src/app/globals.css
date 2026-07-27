@@ -858,7 +858,7 @@ details.proof-panel > .proof-heading::-webkit-details-marker {
 
 details.proof-panel > .generation-timeline {
   min-height: 0;
-  max-height: none;
+  max-height: calc(min(16rem, 36dvh) - 4.1rem);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 0.35rem 1.1rem 0.8rem;
@@ -1454,6 +1454,10 @@ details.proof-panel > .generation-timeline {
 
   details.proof-panel[open] {
     height: min(28rem, 60dvh);
+  }
+
+  details.proof-panel > .generation-timeline {
+    max-height: calc(min(28rem, 60dvh) - 4.1rem);
   }
 
   .preview-frame {
