@@ -604,8 +604,20 @@ h3 {
 
 /* Project workbench */
 
+.builder-shell {
+  display: grid;
+  width: 100%;
+  height: 100dvh;
+  grid-template-rows: 4.25rem minmax(0, 1fr);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 .project-header {
-  position: relative;
+  min-height: 0;
+  padding: 0 1.25rem;
+  background: rgb(255 255 255 / 92%);
 }
 
 .project-header .brand-lockup {
@@ -627,59 +639,77 @@ h3 {
   text-underline-offset: 0.3em;
 }
 
-.project-heading {
+.project-identity {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 2rem;
-  padding: clamp(1.75rem, 4vw, 2.75rem) 0 1.25rem;
+  min-width: 0;
+  align-items: center;
+  gap: 0.85rem;
 }
 
-.project-heading h1 {
-  max-width: 32ch;
+.project-header-divider {
+  width: 1px;
+  height: 1.75rem;
+  flex-shrink: 0;
+  background: var(--rule);
+}
+
+.project-identity .eyebrow {
+  margin-bottom: 0.1rem;
+  font-size: 0.58rem;
+}
+
+.project-identity h1 {
+  max-width: min(38vw, 38rem);
   margin: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  font-size: 0.92rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .project-status {
   max-width: 22rem;
-  margin: 0 0 0.25rem;
+  margin: 0;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   line-height: 1.55;
   text-align: right;
 }
 
 .generation-section {
-  border-top: 1px solid var(--rule);
-  padding-top: 1.25rem;
+  min-height: 0;
 }
 
 .builder-grid {
   display: grid;
-  grid-template-columns: minmax(17rem, 0.34fr) minmax(0, 0.66fr);
-  gap: 1rem;
-  align-items: start;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: clamp(19rem, 23vw, 24rem) minmax(0, 1fr);
+  align-items: stretch;
 }
 
 .evidence-column {
   display: grid;
+  height: 100%;
   min-width: 0;
+  min-height: 0;
   align-content: start;
-  gap: 1rem;
+  gap: 0;
+  overflow: auto;
+  border-right: 1px solid var(--rule);
+  background: #fbfbfd;
 }
 
 .request-panel,
 .proof-panel,
 .preview-panel {
-  border: 1px solid var(--rule);
-  border-radius: var(--radius-card);
   background: var(--surface);
-  box-shadow: 0 1px 2px rgb(23 21 31 / 3%);
 }
 
 .request-panel {
-  padding: 1.1rem;
+  border-bottom: 1px solid var(--rule);
+  padding: 1.15rem 1.25rem;
 }
 
 .request-content {
@@ -691,7 +721,8 @@ h3 {
 }
 
 .proof-panel {
-  padding: 1.1rem;
+  border-bottom: 1px solid var(--rule);
+  padding: 1rem 1.25rem;
 }
 
 .proof-heading {
@@ -819,9 +850,13 @@ h3 {
 .preview-panel {
   --state-color: var(--rule-strong);
   --state-soft: var(--surface-muted);
+  display: flex;
+  height: 100%;
   min-width: 0;
-  min-height: 36rem;
-  padding: 1.1rem;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 1.25rem 1.25rem;
 }
 
 .preview-panel.state-active,
@@ -847,10 +882,11 @@ h3 {
 
 .job-state {
   display: flex;
+  min-height: 4.25rem;
   align-items: center;
   gap: 0.75rem;
   border-bottom: 1px solid var(--rule);
-  padding: 0.35rem 0 0.95rem;
+  padding: 0.65rem 0;
 }
 
 /* Signature element: the agent-pulse status pill. */
@@ -935,7 +971,7 @@ h3 {
   align-items: flex-end;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1.25rem 0 0.85rem;
+  padding: 0.8rem 0 0.65rem;
 }
 
 .preview-heading h3,
@@ -960,9 +996,13 @@ h3 {
 }
 
 .preview-frame-wrap {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--rule);
-  border-radius: var(--radius-card);
+  border-radius: 12px;
   background: #ffffff;
 }
 
@@ -998,19 +1038,53 @@ h3 {
 .preview-frame {
   display: block;
   width: 100%;
-  height: 30rem;
+  height: 100%;
+  min-height: 0;
   border: 0;
   background: #ffffff;
 }
 
 .preview-waiting {
   display: grid;
-  min-height: 28rem;
+  flex: 1;
+  min-height: 0;
   grid-template-rows: auto 1fr;
-  margin-top: 1rem;
   border: 1px dashed var(--rule-strong);
-  border-radius: var(--radius-card);
+  border-radius: 12px;
   background: var(--canvas);
+}
+
+.evidence-column .version-panel,
+.evidence-column .follow-up-panel {
+  margin: 0;
+  border-top: 0;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+  padding: 1rem 1.25rem;
+}
+
+.sidebar-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.restore-button {
+  justify-self: start;
+}
+
+.evidence-column .follow-up-panel {
+  border-bottom: 0;
+}
+
+.evidence-column .follow-up-panel textarea {
+  min-height: 7rem;
+  background: #fbfbfd;
+}
+
+.evidence-column .follow-up-panel .primary-button {
+  width: 100%;
 }
 
 .waiting-register {
@@ -1102,16 +1176,36 @@ h3 {
 }
 
 @media (max-width: 62rem) {
+  .builder-shell {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
   .builder-grid {
+    height: auto;
     grid-template-columns: 1fr;
   }
 
   .evidence-column {
-    grid-template-columns: minmax(0, 0.9fr) minmax(18rem, 1.1fr);
+    height: auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
   }
 
   .preview-panel {
-    min-height: auto;
+    min-height: 42rem;
+  }
+
+  .proof-panel,
+  .evidence-column .follow-up-panel {
+    grid-row: span 2;
+  }
+
+  .preview-frame {
+    min-height: 30rem;
   }
 }
 
@@ -1161,15 +1255,12 @@ h3 {
     flex: 1;
   }
 
-  .project-heading {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 0.75rem;
-    padding: 1.75rem 0 1rem;
+  .builder-shell {
+    display: block;
   }
 
   .project-status {
-    text-align: left;
+    display: none;
   }
 
   .evidence-column {
@@ -1201,6 +1292,7 @@ h3 {
 
   .preview-frame {
     height: 26rem;
+    min-height: 26rem;
   }
 
   .preview-waiting {
@@ -1216,8 +1308,7 @@ h3 {
 
 @media (max-width: 28rem) {
   .project-header .brand-lockup {
-    position: static;
-    transform: none;
+    display: none;
   }
 
   .proof-heading,

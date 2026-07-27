@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { GenerationPanel } from "@/components/projects/generation-panel";
@@ -216,6 +216,10 @@ describe("GenerationPanel", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Preview ready");
     expect(screen.getByTestId("preview-frame")).toBeVisible();
     expect(screen.queryByRole("button", { name: /generation/i })).not.toBeInTheDocument();
+    const evidenceRail = screen.getByLabelText("Build Request and generation evidence");
+    expect(within(evidenceRail).getByRole("heading", { name: "Artifact versions" })).toBeVisible();
+    expect(within(evidenceRail).getByRole("heading", { name: "Describe the next change" })).toBeVisible();
+    expect(within(evidenceRail).queryByTestId("preview-frame")).not.toBeInTheDocument();
   });
 
   it("switches the inspected version without mutation and restores only when asked", async () => {

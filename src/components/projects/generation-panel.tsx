@@ -399,6 +399,60 @@ export function GenerationPanel({
               )}
             </ol>
           </section>
+
+          {generation.versions.length > 0 ? (
+            <section className="version-panel" aria-labelledby="version-title">
+              <div className="sidebar-section-heading">
+                <div>
+                  <p className="request-label">Version history</p>
+                  <h3 id="version-title">Artifact versions</h3>
+                </div>
+                <span className="event-count">{generation.versions.length}</span>
+              </div>
+              <div className="version-controls" role="list" aria-label="Successful Artifact Versions">
+                {generation.versions.map((version) => (
+                  <button
+                    aria-pressed={displayArtifact?.id === version.id}
+                    className="quiet-button"
+                    key={version.id}
+                    onClick={() => void selectVersion(version.id)}
+                    type="button"
+                  >
+                    v{version.version}{generation.artifactVersion?.id === version.id ? " · active" : ""}
+                  </button>
+                ))}
+              </div>
+              {displayArtifact && displayArtifact.id !== generation.artifactVersion?.id ? (
+                <button className="quiet-button restore-button" onClick={() => void restoreVersion()} type="button">
+                  Restore v{displayArtifact.version} as active
+                </button>
+              ) : null}
+            </section>
+          ) : null}
+
+          {displayArtifact ? (
+            <section className="follow-up-panel" aria-labelledby="follow-up-title">
+              <div>
+                <p className="request-label">Continue from v{displayArtifact.version}</p>
+                <h3 id="follow-up-title">Describe the next change</h3>
+              </div>
+              <label className="visually-hidden" htmlFor="follow-up-request">Describe the next change</label>
+              <textarea
+                id="follow-up-request"
+                onChange={(event) => setFollowUp(event.target.value)}
+                placeholder="Add a feature, adjust the layout, or fix an interaction…"
+                value={followUp}
+              />
+              <button
+                className="primary-button"
+                disabled={isActive || isFollowingUp || !followUp.trim()}
+                onClick={() => void submitFollowUp()}
+                type="button"
+              >
+                {isFollowingUp ? "Queueing follow-up…" : `Generate from v${displayArtifact.version}`}
+              </button>
+            </section>
+          ) : null}
         </aside>
 
         <div className={`preview-panel state-${stateCopy.tone}`}>
@@ -460,39 +514,12 @@ export function GenerationPanel({
           ) : null}
           {error ? <p className="error" role="alert">{error}</p> : null}
 
-          {generation.versions.length > 0 ? (
-            <section className="version-panel" aria-labelledby="version-title">
-              <div>
-                <p className="request-label">Version history</p>
-                <h3 id="version-title">Inspect without changing the active result</h3>
-              </div>
-              <div className="version-controls" role="list" aria-label="Successful Artifact Versions">
-                {generation.versions.map((version) => (
-                  <button
-                    aria-pressed={displayArtifact?.id === version.id}
-                    className="quiet-button"
-                    key={version.id}
-                    onClick={() => void selectVersion(version.id)}
-                    type="button"
-                  >
-                    v{version.version}{generation.artifactVersion?.id === version.id ? " · active" : ""}
-                  </button>
-                ))}
-              </div>
-              {displayArtifact && displayArtifact.id !== generation.artifactVersion?.id ? (
-                <button className="quiet-button" onClick={() => void restoreVersion()} type="button">
-                  Restore v{displayArtifact.version} as active
-                </button>
-              ) : null}
-            </section>
-          ) : null}
-
           {hasPreview && displayArtifact ? (
             <>
               <div className="preview-heading">
                 <div>
-                  <p className="eyebrow">Artifact Version {displayArtifact.version}</p>
-                  <h3>Inspect the result</h3>
+                  <p className="eyebrow">App viewer</p>
+                  <h3>Artifact Version {displayArtifact.version}</h3>
                 </div>
                 <span className="preview-badge">No network · no navigation</span>
               </div>
@@ -523,28 +550,6 @@ export function GenerationPanel({
               </div>
             </div>
           )}
-
-          {displayArtifact ? (
-            <section className="follow-up-panel" aria-labelledby="follow-up-title">
-              <p className="request-label">Continue from v{displayArtifact.version}</p>
-              <h3 id="follow-up-title">Follow-up Build Request</h3>
-              <label className="visually-hidden" htmlFor="follow-up-request">Describe the next change</label>
-              <textarea
-                id="follow-up-request"
-                onChange={(event) => setFollowUp(event.target.value)}
-                placeholder="Describe the change for a new immutable version."
-                value={followUp}
-              />
-              <button
-                className="primary-button"
-                disabled={isActive || isFollowingUp || !followUp.trim()}
-                onClick={() => void submitFollowUp()}
-                type="button"
-              >
-                {isFollowingUp ? "Queueing follow-up…" : `Generate from v${displayArtifact.version}`}
-              </button>
-            </section>
-          ) : null}
         </div>
       </div>
     </section>

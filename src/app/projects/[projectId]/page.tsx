@@ -28,21 +28,22 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
   return (
     <main className="shell builder-shell" id="main-content">
       <header className="product-header project-header">
-        <Link className="back-link" href="/workspace">← Workspace</Link>
+        <div className="project-identity">
+          <Link className="back-link" href="/workspace">← Workspace</Link>
+          <span className="project-header-divider" aria-hidden="true" />
+          <div>
+            <p className="eyebrow">Project</p>
+            <h1 id="project-title">{result.project.name}</h1>
+          </div>
+        </div>
         <p className="brand-lockup">
           <span className="brand-mark" aria-hidden="true">m/a</span>
           <span>min-atoms</span>
         </p>
-      </header>
-      <section className="project-heading" aria-labelledby="project-title">
-        <div>
-          <p className="eyebrow">Project</p>
-          <h1 id="project-title">{result.project.name}</h1>
-        </div>
         <p className="project-status">
           The agent works beside the live preview. Stop it anytime.
         </p>
-      </section>
+      </header>
       <GenerationPanel
         buildRequest={result.buildRequest.content}
         initialGeneration={generation}
