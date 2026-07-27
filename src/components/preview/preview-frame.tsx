@@ -8,6 +8,8 @@ import {
   type PreviewBridgeHost,
 } from "@/components/preview/preview-bridge";
 import type { PreviewDataRequest } from "@/lib/generated-app-data/contract";
+import { readArtifactManifest } from "@/lib/generation/manifest";
+import { UI_PRESETS } from "@/lib/generation/ui-presets";
 
 type PreviewFrameProps = {
   artifactVersionId: string;
@@ -82,7 +84,7 @@ export function PreviewFrame({ artifactVersionId, files, projectId }: PreviewFra
       <div className="preview-toolbar">
         <span className="preview-registration" aria-hidden="true">A-01</span>
         <span>Interactive Preview</span>
-        <span className="preview-lock">Sandboxed · offline</span>
+        <span className="preview-lock">Sandboxed · controlled assets</span>
       </div>
       <iframe
         className="preview-frame"
@@ -158,10 +160,16 @@ export function buildPreviewDocument(
     projectId: "preview-project",
   },
 ): string {
+  const manifest = readArtifactManifest(files["manifest.json"]);
+  if (!manifest) {
+    throw new Error("Cannot build a preview from an invalid artifact manifest.");
+  }
+  const stylesheet = UI_PRESETS[manifest.ui.preset].stylesheet;
+  const styleOrigin = stylesheet ? new URL(stylesheet.url).origin : null;
   const contentSecurityPolicy = [
     "default-src 'none'",
     "script-src 'unsafe-inline'",
-    "style-src 'unsafe-inline'",
+    `style-src 'unsafe-inline'${styleOrigin ? ` ${styleOrigin}` : ""}`,
     "img-src data:",
     "connect-src 'none'",
     "font-src 'none'",
@@ -171,5 +179,9 @@ export function buildPreviewDocument(
     "base-uri 'none'",
   ].join("; ");
 
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}"><style>${files["styles.css"].replaceAll("</style", "<\\/style")}</style></head><body>${files["index.html"]}<script>${buildGeneratedAppDataClient(context).replaceAll("</script", "<\\/script")}</script><script>${files["app.js"].replaceAll("</script", "<\\/script")}</script></body></html>`;
+  const presetLink = stylesheet
+    ? `<link rel="stylesheet" href="${stylesheet.url}"${stylesheet.integrity ? ` integrity="${stylesheet.integrity}"` : ""} crossorigin="${stylesheet.crossOrigin}">`
+    : "";
+
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}">${presetLink}<style>${files["styles.css"].replaceAll("</style", "<\\/style")}</style></head><body>${files["index.html"]}<script>${buildGeneratedAppDataClient(context).replaceAll("</script", "<\\/script")}</script><script>${files["app.js"].replaceAll("</script", "<\\/script")}</script></body></html>`;
 }

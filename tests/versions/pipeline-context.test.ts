@@ -5,7 +5,10 @@ import { deterministicProvider } from "@/lib/generation/provider";
 const v1Files = {
   "app.js": "const value = 0;",
   "index.html": '<button id="increment">Add one</button><output id="count">0</output>',
-  "manifest.json": JSON.stringify({ entry: "index.html" }),
+  "manifest.json": JSON.stringify({
+    entry: "index.html",
+    ui: { preset: "min-atoms-base" },
+  }),
   "styles.css": "",
 };
 

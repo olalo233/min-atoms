@@ -23,9 +23,25 @@ describe("preview security boundary", () => {
     expect(document).toContain("frame-src 'none'");
     expect(document).toContain("form-action 'none'");
     expect(document).toContain("base-uri 'none'");
+    expect(document).toContain("https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.min.css");
+    expect(document).toContain("style-src 'unsafe-inline' https://cdn.jsdelivr.net");
+    expect(document).not.toContain("script-src 'unsafe-inline' https://cdn.jsdelivr.net");
     expect(document).toContain("window.minAtomsData");
     expect(document).toContain("min-atoms-data-request");
     expect(files["app.js"]).toContain("window.minAtomsData.get(\"counter\")");
     expect(files["app.js"]).toContain("window.minAtomsData.set(\"counter\", value)");
+  });
+
+  it("keeps the dependency-free preset offline", async () => {
+    const files = await deterministicProvider.generate({ baseArtifact: null, buildRequest: "Make a timer" });
+    const manifest = JSON.parse(files["manifest.json"]);
+    manifest.ui = { preset: "min-atoms-base" };
+    const document = buildPreviewDocument({
+      ...files,
+      "manifest.json": JSON.stringify(manifest),
+    });
+
+    expect(document).toContain("style-src 'unsafe-inline'; img-src data:");
+    expect(document).not.toContain("cdn.jsdelivr.net");
   });
 });

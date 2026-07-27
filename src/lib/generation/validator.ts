@@ -1,4 +1,5 @@
 import { ARTIFACT_FILES, type ArtifactFiles } from "@/lib/generation/types";
+import { readArtifactManifest } from "@/lib/generation/manifest";
 
 const MAX_FILE_SIZE = 40_000;
 const FORBIDDEN_CONTENT = [
@@ -73,46 +74,11 @@ export function validateArtifact(input: unknown): ArtifactFiles {
     reject("Artifact app.js uses a forbidden runtime escape.");
   }
 
-  let manifest: unknown;
-  try {
-    manifest = JSON.parse(files["manifest.json"] as string);
-  } catch {
-    reject("Artifact manifest must be valid JSON.");
+  const manifest = readArtifactManifest(files["manifest.json"] as string);
+  if (!manifest) {
+    reject("Artifact manifest must satisfy the required contract.");
   }
-
-  if (
-    !manifest ||
-    typeof manifest !== "object" ||
-    Array.isArray(manifest) ||
-    (manifest as { entry?: unknown }).entry !== "index.html"
-  ) {
-    reject("Artifact manifest must point to index.html.");
-  }
-
-  const smoke = (manifest as { smoke?: unknown }).smoke;
-  if (
-    !smoke ||
-    typeof smoke !== "object" ||
-    Array.isArray(smoke) ||
-    typeof (smoke as { selector?: unknown }).selector !== "string" ||
-    (smoke as { action?: unknown }).action !== "click" ||
-    !(
-      (smoke as { expect?: unknown }).expect &&
-      typeof (smoke as { expect?: unknown }).expect === "object"
-    ) ||
-    typeof (
-      (smoke as { expect: { selector?: unknown } }).expect.selector
-    ) !== "string" ||
-    typeof (
-      (smoke as { expect: { text?: unknown } }).expect.text
-    ) !== "string"
-  ) {
-    reject("Artifact manifest must declare a smoke interaction.");
-  }
-  const smokeContract = smoke as {
-    expect: { selector: string; text: string };
-    selector: string;
-  };
+  const smokeContract = manifest.smoke;
   const idSelector = /^#[A-Za-z][\w:-]{0,63}$/;
   if (
     !idSelector.test(smokeContract.selector) ||

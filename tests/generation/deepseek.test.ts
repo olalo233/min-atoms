@@ -49,5 +49,10 @@ describe("DeepSeek artifact contract", () => {
     expect(instruction).toContain("does not infer a select value");
     expect(instruction).toContain("operator.value || '+'");
     expect(instruction).toContain("synchronously update the expected element");
+    expect(instruction).toContain("pico-2");
+    expect(instruction).toContain("bootstrap-5");
+    expect(instruction).toContain("one signature element");
+    expect(instruction).toContain("platform loads the preset stylesheet");
+    expect(instruction).toContain("never add link or script tags");
   });
 });

@@ -24,6 +24,7 @@ const files = {
   "index.html": '<button id="trigger">Try it</button><output id="result"></output>',
   "manifest.json": JSON.stringify({
     entry: "index.html",
+    ui: { preset: "min-atoms-base" },
     smoke: {
       action: "click",
       expect: { selector: "#result", text: "ready" },
@@ -169,7 +170,7 @@ describe("generation worker", () => {
     expect(provider.repair).toHaveBeenCalledWith(
       { baseArtifact: null, buildRequest: "Build a counter" },
       repairable,
-      "Artifact manifest must point to index.html.",
+      "Artifact manifest must satisfy the required contract.",
     );
     expect(repository.updateGenerationStatus.mock.calls).toEqual([
       ["job-3", "planning", "generating", "Generating the constrained four-file artifact."],
@@ -226,7 +227,7 @@ describe("generation worker", () => {
         buildRequest: "Render Markdown without external libraries",
       },
       first,
-      "Artifact manifest must point to index.html.",
+      "Artifact manifest must satisfy the required contract.",
     );
     expect(provider.repair).toHaveBeenNthCalledWith(
       2,
@@ -276,7 +277,7 @@ describe("generation worker", () => {
     expect(provider.repair).toHaveBeenCalledWith(
       { baseArtifact: null, buildRequest: "Build a counter" },
       invalid,
-      "Artifact manifest must point to index.html.",
+      "Artifact manifest must satisfy the required contract.",
     );
     expect(repository.completeGenerationJob).not.toHaveBeenCalled();
     expect(repository.failGenerationJob).toHaveBeenCalledWith(

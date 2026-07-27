@@ -28,6 +28,7 @@ function createProgrammerCalculatorArtifact(version: number) {
       name: `Programmer calculator v${version}`,
       version,
       entry: "index.html",
+      ui: { preset: "bootstrap-5" },
       stylesheet: "styles.css",
       script: "app.js",
       smoke: {
@@ -64,6 +65,7 @@ export const deterministicProvider: GenerationProvider = {
         name: `Deterministic v${version}`,
         version,
         entry: "index.html",
+        ui: { preset: "pico-2" },
         stylesheet: "styles.css",
         script: "app.js",
         smoke: {

@@ -35,7 +35,39 @@ describe("deterministic artifact contract", () => {
         "manifest.json": "not json",
         "styles.css": "",
       }),
-    ).toThrow("valid JSON");
+    ).toThrow("required contract");
+  });
+
+  it("accepts only platform-controlled UI presets", () => {
+    const artifact = {
+      "app.js": "",
+      "index.html": '<button id="go">Go</button><output id="result">0</output>',
+      "styles.css": "",
+      "manifest.json": "",
+    };
+    const manifest = {
+      entry: "index.html",
+      smoke: {
+        action: "click",
+        expect: { selector: "#result", text: "1" },
+        selector: "#go",
+      },
+    };
+
+    expect(() => validateArtifact({
+      ...artifact,
+      "manifest.json": JSON.stringify({
+        ...manifest,
+        ui: { preset: "untrusted-framework" },
+      }),
+    })).toThrow("required contract");
+    expect(() => validateArtifact({
+      ...artifact,
+      "manifest.json": JSON.stringify({
+        ...manifest,
+        ui: { preset: "pico-2", url: "https://untrusted.example/framework.css" },
+      }),
+    })).toThrow("forbidden capability");
   });
 
   it("escapes the request before placing it in generated HTML", async () => {
@@ -60,6 +92,7 @@ describe("deterministic artifact contract", () => {
       "index.html": "<button id=\"go\">Go</button><output id=\"result\">0</output>",
       "manifest.json": JSON.stringify({
         entry: "index.html",
+        ui: { preset: "min-atoms-base" },
         smoke: {
           action: "click",
           expect: { selector: "#result", text: "1" },
@@ -92,6 +125,7 @@ describe("deterministic artifact contract", () => {
       "index.html": "<button id=\"go\">Go</button><output id=\"result\">0</output>",
       "manifest.json": JSON.stringify({
         entry: "index.html",
+        ui: { preset: "min-atoms-base" },
         smoke: {
           action: "click",
           expect: { selector: "#result", text: "1" },
