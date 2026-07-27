@@ -371,6 +371,7 @@ h3 {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  overscroll-behavior: contain;
 }
 
 .version-controls [aria-pressed="true"] {
@@ -604,6 +605,13 @@ h3 {
 
 /* Project workbench */
 
+html:has(.builder-shell),
+body:has(.builder-shell) {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 .builder-shell {
   display: grid;
   width: 100%;
@@ -612,6 +620,7 @@ h3 {
   margin: 0;
   padding: 0;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .project-header {
@@ -694,7 +703,7 @@ h3 {
   height: 100%;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: minmax(12rem, 1fr) auto auto auto;
+  grid-template-rows: minmax(0, 1fr) auto auto auto;
   gap: 0;
   overflow: hidden;
   border-right: 1px solid var(--rule);
@@ -826,7 +835,15 @@ h3 {
 
 details.proof-panel {
   grid-row: 2;
+  min-height: 0;
   padding: 0;
+}
+
+details.proof-panel[open] {
+  display: grid;
+  max-height: min(16rem, 36dvh);
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
 }
 
 details.proof-panel > .proof-heading {
@@ -840,8 +857,10 @@ details.proof-panel > .proof-heading::-webkit-details-marker {
 }
 
 details.proof-panel > .generation-timeline {
-  max-height: 15rem;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0.35rem 1.1rem 0.8rem;
 }
 
@@ -1124,6 +1143,7 @@ details.proof-panel > .generation-timeline {
   border: 1px solid var(--rule);
   border-radius: 12px;
   background: #ffffff;
+  overscroll-behavior: contain;
 }
 
 .preview-toolbar {
@@ -1390,10 +1410,18 @@ details.proof-panel > .generation-timeline {
 }
 
 @media (max-width: 62rem) {
+  html:has(.builder-shell),
+  body:has(.builder-shell) {
+    height: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: none;
+  }
+
   .builder-shell {
     height: auto;
     min-height: 100dvh;
-    overflow: visible;
+    overflow: clip;
   }
 
   .builder-grid {
@@ -1404,6 +1432,7 @@ details.proof-panel > .generation-timeline {
   .evidence-column {
     height: auto;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto;
     overflow: visible;
     border-right: 0;
     border-bottom: 1px solid var(--rule);
@@ -1416,6 +1445,15 @@ details.proof-panel > .generation-timeline {
   .proof-panel,
   .evidence-column .follow-up-panel {
     grid-row: span 2;
+  }
+
+  .conversation-panel,
+  .evidence-column .version-panel {
+    grid-row: auto;
+  }
+
+  details.proof-panel[open] {
+    max-height: 28rem;
   }
 
   .preview-frame {
