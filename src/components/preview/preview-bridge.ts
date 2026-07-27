@@ -2,6 +2,10 @@ import {
   parsePreviewDataRequest,
   type PreviewDataRequest,
 } from "@/lib/generated-app-data/contract";
+import {
+  parseRuntimeDiagnostic,
+  type RuntimeDiagnostic,
+} from "@/lib/generation/runtime-diagnostic";
 
 export type PreviewBridgeHost = {
   addEventListener(type: "message", listener: (event: MessageEvent<unknown>) => void): void;
@@ -24,6 +28,7 @@ type PreviewBridgeOptions = {
   platformRequest: (request: PreviewDataRequest) => Promise<{ data?: unknown }>;
   projectId: string;
   respond?: (target: Window, response: PreviewBridgeResponse) => void;
+  runtimeReport?: (diagnostic: RuntimeDiagnostic) => Promise<void>;
 };
 
 function sendResponse(target: Window, response: PreviewBridgeResponse): void {
@@ -41,6 +46,16 @@ export function createPreviewBridge(options: PreviewBridgeOptions): () => void {
       options.isActiveDocument?.() === false ||
       event.origin !== "null"
     ) {
+      return;
+    }
+
+    const runtimeDiagnostic = parseRuntimeDiagnostic(event.data);
+    if (
+      runtimeDiagnostic &&
+      runtimeDiagnostic.projectId === options.projectId &&
+      runtimeDiagnostic.artifactVersionId === options.artifactVersionId
+    ) {
+      await options.runtimeReport?.(runtimeDiagnostic);
       return;
     }
 

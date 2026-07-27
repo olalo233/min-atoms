@@ -53,7 +53,7 @@ export function validateArtifact(input: unknown): ArtifactFiles {
     : null;
   if (!manifest) {
     findings.push("Artifact manifest must satisfy the required contract.");
-  } else {
+  } else if (manifest.smoke) {
     const smokeContract = manifest.smoke;
     const idSelector = /^#[A-Za-z][\w:-]{0,63}$/;
     if (

@@ -8,7 +8,7 @@ describe("DeepSeek artifact contract", () => {
     delete process.env.DEEPSEEK_API_KEY;
   });
 
-  it("requires self-contained code compatible with the preview smoke runtime", async () => {
+  it("requires self-contained code compatible with the real browser Preview", async () => {
     process.env.DEEPSEEK_API_KEY = "test-key";
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -48,16 +48,17 @@ describe("DeepSeek artifact contract", () => {
     expect(instruction).toContain("Do not rely on undeclared globals");
     expect(instruction).toContain("Markdown");
     expect(instruction).toContain("without external libraries");
-    expect(instruction).toContain("between one and eight declared click actions");
-    expect(instruction).toContain("synchronously advance the expected interaction");
+    expect(instruction).toContain("Canvas 2D");
+    expect(instruction).toContain("requestAnimationFrame");
+    expect(instruction).toContain("keyboard, pointer, and touch events");
+    expect(instruction).toContain("reports real browser errors");
     expect(instruction).toContain("pico-2");
     expect(instruction).toContain("bootstrap-5");
     expect(instruction).toContain("one signature element");
     expect(instruction).toContain("platform loads the preset stylesheet");
     expect(instruction).toContain("never add link or script tags");
-    expect(instruction).toContain("7, +, 1, =");
     expect(instruction).toContain("expression must be exactly 7+1");
-    expect(instruction).toContain('expect text "8"');
+    expect(instruction).toContain("legacy smoke object is allowed but optional");
   });
 
   it("requires a repair response to change the rejected candidate", async () => {

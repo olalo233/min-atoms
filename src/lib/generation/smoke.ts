@@ -83,6 +83,7 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
       "Artifact manifest must satisfy the required contract.",
     );
   }
+  if (!manifest.smoke) return;
   const actionIds = manifest.smoke.actions.map(
     (action) => action.selector.slice(1),
   );

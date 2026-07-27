@@ -131,4 +131,46 @@ describe("Preview bridge", () => {
     expect(platformRequest).not.toHaveBeenCalled();
     stop();
   });
+
+  it("forwards a bounded runtime diagnostic only from the active exact iframe", async () => {
+    const iframeWindow = {} as Window;
+    const wrongWindow = {} as Window;
+    const runtimeReport = vi.fn(async () => undefined);
+    const harness = createHost();
+    const stop = createPreviewBridge({
+      artifactVersionId: "version-1",
+      host: harness.host,
+      iframeWindow: () => iframeWindow,
+      platformRequest: vi.fn(async () => ({})),
+      projectId: "project-1",
+      runtimeReport,
+    });
+    const diagnostic = {
+      artifactVersionId: "version-1",
+      detail: "ReferenceError: gameLoop is not defined",
+      kind: "error",
+      projectId: "project-1",
+      type: "min-atoms-runtime-diagnostic",
+    };
+
+    harness.emit({
+      data: diagnostic,
+      origin: "null",
+      source: wrongWindow,
+    } as MessageEvent);
+    harness.emit({
+      data: { ...diagnostic, artifactVersionId: "version-2" },
+      origin: "null",
+      source: iframeWindow,
+    } as MessageEvent);
+    harness.emit({
+      data: diagnostic,
+      origin: "null",
+      source: iframeWindow,
+    } as MessageEvent);
+
+    await vi.waitFor(() => expect(runtimeReport).toHaveBeenCalledTimes(1));
+    expect(runtimeReport).toHaveBeenCalledWith(diagnostic);
+    stop();
+  });
 });

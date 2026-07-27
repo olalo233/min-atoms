@@ -32,6 +32,9 @@ describe("preview security boundary", () => {
     expect(document).not.toContain("script-src 'unsafe-inline' https://cdn.jsdelivr.net");
     expect(document).toContain("window.minAtomsData");
     expect(document).toContain("min-atoms-data-request");
+    expect(document).toContain("min-atoms-runtime-diagnostic");
+    expect(document).toContain('window.addEventListener("error"');
+    expect(document).toContain('window.addEventListener("unhandledrejection"');
     expect(files["app.js"]).toContain("window.minAtomsData.get(\"counter\")");
     expect(files["app.js"]).toContain("window.minAtomsData.set(\"counter\", value)");
   });

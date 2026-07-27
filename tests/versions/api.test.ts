@@ -8,12 +8,14 @@ import {
 import { GET as listVersions } from "@/app/api/projects/[projectId]/versions/route";
 import { GET as getVersion } from "@/app/api/projects/[projectId]/versions/[versionId]/route";
 import { POST as restoreVersion } from "@/app/api/projects/[projectId]/versions/[versionId]/restore/route";
+import { POST as reportRuntimeDiagnostic } from "@/app/api/projects/[projectId]/versions/[versionId]/runtime-diagnostic/route";
 import { getCurrentUser } from "@/lib/auth/session";
 import {
   cancelOwnedGeneration,
   getOwnedArtifactVersion,
   getOwnedGenerationSnapshot,
   listOwnedArtifactVersions,
+  queueOwnedRuntimeRepair,
   restoreOwnedArtifactVersion,
 } from "@/lib/generation/repository";
 import {
@@ -36,6 +38,7 @@ vi.mock("@/lib/generation/repository", () => ({
   getOwnedArtifactVersion: vi.fn(),
   getOwnedGenerationSnapshot: vi.fn(),
   listOwnedArtifactVersions: vi.fn(),
+  queueOwnedRuntimeRepair: vi.fn(),
   restoreOwnedArtifactVersion: vi.fn(),
 }));
 vi.mock("@/lib/projects/repository", () => ({
@@ -208,5 +211,41 @@ describe("version API contracts", () => {
       "project-1",
       "11111111-1111-4111-8111-111111111111",
     );
+  });
+
+  it("persists a real-browser diagnostic and schedules the same job repair after responding", async () => {
+    vi.mocked(queueOwnedRuntimeRepair).mockResolvedValue({
+      jobId: "job-1",
+      queued: true,
+    });
+    vi.mocked(getOwnedGenerationSnapshot).mockResolvedValue({
+      artifactVersion: null,
+      events: [],
+      job: { status: "repairing" } as never,
+      versions: [],
+    });
+
+    const response = await reportRuntimeDiagnostic(
+      new Request("http://localhost", {
+        body: JSON.stringify({
+          detail: "ReferenceError: gameLoop is not defined",
+          kind: "error",
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(202);
+    expect(queueOwnedRuntimeRepair).toHaveBeenCalledWith(
+      "owner-1",
+      "project-1",
+      "11111111-1111-4111-8111-111111111111",
+      "error: ReferenceError: gameLoop is not defined",
+    );
+    expect(runGenerationJob).not.toHaveBeenCalled();
+    await flushAfterCallbacks();
+    expect(runGenerationJob).toHaveBeenCalledWith("job-1");
   });
 });

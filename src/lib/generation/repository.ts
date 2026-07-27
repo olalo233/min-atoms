@@ -50,6 +50,11 @@ export type GenerationAttemptInput = {
   repairPatch?: ArtifactRepairPatch;
 };
 
+export type RuntimeRepairQueueResult = {
+  jobId: string;
+  queued: boolean;
+};
+
 export async function createGenerationJob(
   projectId: string,
   buildRequestId: string,
@@ -598,6 +603,117 @@ export async function completeGenerationJob(
       .where(eq(projects.id, projectId));
 
     return artifactVersion;
+  });
+}
+
+export async function queueOwnedRuntimeRepair(
+  ownerId: string,
+  projectId: string,
+  artifactVersionId: string,
+  detail: string,
+): Promise<RuntimeRepairQueueResult | null> {
+  const diagnostic = sanitizeAttemptDetail(
+    `Real browser Preview failed at runtime: ${detail}`,
+  );
+  if (!diagnostic) {
+    throw new Error("Runtime diagnostic cannot be empty.");
+  }
+
+  return getDb().transaction(async (transaction) => {
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${projectId}))`,
+    );
+    const [identity] = await transaction
+      .select({
+        artifact: artifactVersions,
+        activeArtifactVersionId: projects.activeArtifactVersionId,
+        job: generationJobs,
+      })
+      .from(artifactVersions)
+      .innerJoin(projects, eq(artifactVersions.projectId, projects.id))
+      .innerJoin(generationJobs, eq(artifactVersions.jobId, generationJobs.id))
+      .where(
+        and(
+          eq(artifactVersions.id, artifactVersionId),
+          eq(artifactVersions.projectId, projectId),
+          eq(projects.ownerId, ownerId),
+        ),
+      )
+      .limit(1);
+    if (!identity) return null;
+    if (
+      identity.activeArtifactVersionId !== artifactVersionId ||
+      identity.job.status !== "completed"
+    ) {
+      return { jobId: identity.job.id, queued: false };
+    }
+
+    const [activeJob] = await transaction
+      .select({ id: generationJobs.id })
+      .from(generationJobs)
+      .where(
+        and(
+          eq(generationJobs.projectId, projectId),
+          inArray(generationJobs.status, [...ACTIVE_GENERATION_STATUSES]),
+        ),
+      )
+      .limit(1);
+    if (activeJob) {
+      return { jobId: activeJob.id, queued: false };
+    }
+
+    const [lastAttempt] = await transaction
+      .select({ sequence: generationAttempts.sequence })
+      .from(generationAttempts)
+      .where(eq(generationAttempts.jobId, identity.job.id))
+      .orderBy(desc(generationAttempts.sequence))
+      .limit(1);
+    const sequence = (lastAttempt?.sequence ?? 0) + 1;
+    if (sequence >= MAX_GENERATION_ATTEMPTS) {
+      return { jobId: identity.job.id, queued: false };
+    }
+
+    const [updated] = await transaction
+      .update(generationJobs)
+      .set({
+        completedAt: null,
+        errorMessage: null,
+        status: "repairing",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(generationJobs.id, identity.job.id),
+          eq(generationJobs.status, "completed"),
+        ),
+      )
+      .returning({ id: generationJobs.id });
+    if (!updated) {
+      return { jobId: identity.job.id, queued: false };
+    }
+
+    await transaction.insert(generationAttempts).values({
+      candidateFiles: validateArtifact(identity.artifact.files),
+      diagnostic,
+      jobId: identity.job.id,
+      kind: "repair",
+      outcome: "rejected",
+      sequence,
+    });
+
+    const [lastEvent] = await transaction
+      .select({ sequence: generationEvents.sequence })
+      .from(generationEvents)
+      .where(eq(generationEvents.jobId, identity.job.id))
+      .orderBy(desc(generationEvents.sequence))
+      .limit(1);
+    await transaction.insert(generationEvents).values({
+      jobId: identity.job.id,
+      message: `${diagnostic} The persisted Artifact Version was kept visible while AI repair was queued.`,
+      sequence: (lastEvent?.sequence ?? 0) + 1,
+      stage: "repairing",
+    });
+    return { jobId: identity.job.id, queued: true };
   });
 }
 

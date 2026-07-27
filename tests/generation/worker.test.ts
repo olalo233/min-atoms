@@ -66,6 +66,7 @@ describe("durable generation worker", () => {
 
     expect(provider.generate).toHaveBeenCalledTimes(1);
     expect(provider.repair).not.toHaveBeenCalled();
+    expect(smoke.validateArtifactSmoke).not.toHaveBeenCalled();
     expect(repository.completeGenerationJob).toHaveBeenCalledWith(
       "job-1",
       "project-1",

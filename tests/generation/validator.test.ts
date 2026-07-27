@@ -146,6 +146,26 @@ describe("deterministic artifact contract", () => {
     expect(validateArtifact(artifact)).toEqual(artifact);
   });
 
+  it("accepts a browser-native Canvas game without a QuickJS smoke contract", () => {
+    const artifact = {
+      "app.js": `
+        const canvas = document.querySelector("#game");
+        const context = canvas.getContext("2d");
+        window.addEventListener("keydown", () => requestAnimationFrame(() => {
+          context.fillRect(0, 0, 12, 12);
+        }));
+      `,
+      "index.html": '<canvas id="game" width="320" height="320"></canvas>',
+      "manifest.json": JSON.stringify({
+        entry: "index.html",
+        ui: { preset: "min-atoms-base" },
+      }),
+      "styles.css": "canvas { inline-size: min(100%, 32rem); }",
+    };
+
+    expect(validateArtifact(artifact)).toEqual(artifact);
+  });
+
   it("reports all deterministic findings in one bounded repair diagnostic", () => {
     let diagnostic = "";
     try {

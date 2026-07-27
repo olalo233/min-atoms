@@ -9,11 +9,14 @@ import {
 } from "@/components/preview/preview-bridge";
 import type { PreviewDataRequest } from "@/lib/generated-app-data/contract";
 import { readArtifactManifest } from "@/lib/generation/manifest";
+import type { RuntimeDiagnostic } from "@/lib/generation/runtime-diagnostic";
+import type { GenerationSnapshot } from "@/lib/generation/types";
 import { UI_PRESETS } from "@/lib/generation/ui-presets";
 
 type PreviewFrameProps = {
   artifactVersionId: string;
   files: ArtifactFiles;
+  onRuntimeRepairQueued?: (snapshot: GenerationSnapshot) => void;
   projectId: string;
 };
 
@@ -42,7 +45,12 @@ async function requestGeneratedAppData(request: PreviewDataRequest): Promise<{ d
   return { data: body.value ?? null };
 }
 
-export function PreviewFrame({ artifactVersionId, files, projectId }: PreviewFrameProps) {
+export function PreviewFrame({
+  artifactVersionId,
+  files,
+  onRuntimeRepairQueued,
+  projectId,
+}: PreviewFrameProps) {
   const bridgeReadyRef = useRef(false);
   const loadedSrcDocRef = useRef<string | null>(null);
   const previewDocumentActiveRef = useRef(false);
@@ -74,6 +82,30 @@ export function PreviewFrame({ artifactVersionId, files, projectId }: PreviewFra
     previewDocumentActiveRef.current = true;
     announceBridgeReady();
   }, [announceBridgeReady, srcDoc]);
+  const reportRuntimeDiagnostic = useCallback(
+    async (diagnostic: RuntimeDiagnostic) => {
+      try {
+        const response = await fetch(
+          `/api/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(artifactVersionId)}/runtime-diagnostic`,
+          {
+            body: JSON.stringify({
+              detail: diagnostic.detail,
+              kind: diagnostic.kind,
+            }),
+            headers: { "content-type": "application/json" },
+            method: "POST",
+          },
+        );
+        if (!response.ok) return;
+        const snapshot = (await response.json()) as GenerationSnapshot;
+        onRuntimeRepairQueued?.(snapshot);
+      } catch {
+        // The Artifact Version remains visible; a transient reporting failure
+        // must not replace the real browser error with a platform error.
+      }
+    },
+    [artifactVersionId, onRuntimeRepairQueued, projectId],
+  );
 
   useEffect(() => {
     const alreadyLoaded = loadedSrcDocRef.current === srcDoc;
@@ -85,6 +117,7 @@ export function PreviewFrame({ artifactVersionId, files, projectId }: PreviewFra
       isActiveDocument: () => previewDocumentActiveRef.current,
       platformRequest: requestGeneratedAppData,
       projectId,
+      runtimeReport: reportRuntimeDiagnostic,
     });
     bridgeReadyRef.current = true;
     if (alreadyLoaded) {
@@ -95,7 +128,13 @@ export function PreviewFrame({ artifactVersionId, files, projectId }: PreviewFra
       previewDocumentActiveRef.current = false;
       stop();
     };
-  }, [announceBridgeReady, artifactVersionId, projectId, srcDoc]);
+  }, [
+    announceBridgeReady,
+    artifactVersionId,
+    projectId,
+    reportRuntimeDiagnostic,
+    srcDoc,
+  ]);
 
   return (
     <div className="preview-frame-wrap">
@@ -171,6 +210,38 @@ function buildGeneratedAppDataClient(context: {
   })();`;
 }
 
+function buildRuntimeDiagnosticClient(context: {
+  artifactVersionId: string;
+  projectId: string;
+}): string {
+  const serializedContext = JSON.stringify(context).replaceAll("<", "\\u003c");
+  return `(function () {
+    const context = ${serializedContext};
+    let reported = false;
+    function describe(value) {
+      if (value && typeof value.stack === "string") return value.stack;
+      if (value && typeof value.message === "string") return value.message;
+      try { return String(value); } catch { return "Unknown runtime failure"; }
+    }
+    function report(kind, value) {
+      if (reported) return;
+      reported = true;
+      window.parent.postMessage({
+        ...context,
+        detail: describe(value).slice(0, 640),
+        kind,
+        type: "min-atoms-runtime-diagnostic",
+      }, "*");
+    }
+    window.addEventListener("error", (event) => {
+      report("error", event.error || event.message);
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+      report("unhandledrejection", event.reason);
+    });
+  })();`;
+}
+
 export function buildPreviewDocument(
   files: ArtifactFiles,
   context: { artifactVersionId: string; projectId: string } = {
@@ -201,5 +272,5 @@ export function buildPreviewDocument(
     ? `<link rel="stylesheet" href="${stylesheet.url}"${stylesheet.integrity ? ` integrity="${stylesheet.integrity}"` : ""} crossorigin="${stylesheet.crossOrigin}">`
     : "";
 
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><base href="about:srcdoc"><meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}">${presetLink}<style>${files["styles.css"].replaceAll("</style", "<\\/style")}</style></head><body>${files["index.html"]}<script>${buildGeneratedAppDataClient(context).replaceAll("</script", "<\\/script")}</script><script>${files["app.js"].replaceAll("</script", "<\\/script")}</script></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><base href="about:srcdoc"><meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}">${presetLink}<style>${files["styles.css"].replaceAll("</style", "<\\/style")}</style></head><body>${files["index.html"]}<script>${buildGeneratedAppDataClient(context).replaceAll("</script", "<\\/script")}</script><script>${buildRuntimeDiagnosticClient(context).replaceAll("</script", "<\\/script")}</script><script>${files["app.js"].replaceAll("</script", "<\\/script")}</script></body></html>`;
 }

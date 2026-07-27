@@ -2,7 +2,7 @@ import { isUiPresetName, type UiPresetName } from "@/lib/generation/ui-presets";
 
 export type ArtifactManifest = {
   entry: "index.html";
-  smoke: {
+  smoke?: {
     actions: Array<{
       action: "click";
       selector: string;
@@ -23,7 +23,7 @@ function hasExactKeys(value: Record<string, unknown>, keys: string[]): boolean {
 
 function parseSmokeActions(
   smoke: Record<string, unknown>,
-): ArtifactManifest["smoke"]["actions"] | null {
+): NonNullable<ArtifactManifest["smoke"]>["actions"] | null {
   if (
     hasExactKeys(smoke, ["action", "expect", "selector"]) &&
     smoke.action === "click" &&
@@ -39,7 +39,7 @@ function parseSmokeActions(
   ) {
     return null;
   }
-  const actions: ArtifactManifest["smoke"]["actions"] = [];
+  const actions: NonNullable<ArtifactManifest["smoke"]>["actions"] = [];
   for (const value of smoke.actions) {
     if (
       !value ||
@@ -67,23 +67,41 @@ export function parseArtifactManifest(value: unknown): ArtifactManifest | null {
     : null;
   if (!ui) return null;
   if (!isUiPresetName(ui.preset) || Object.keys(ui).some((key) => key !== "preset")) return null;
-  if (!manifest.smoke || typeof manifest.smoke !== "object" || Array.isArray(manifest.smoke)) return null;
-  const smoke = manifest.smoke as Record<string, unknown>;
-  const actions = parseSmokeActions(smoke);
-  if (!actions) return null;
-  if (!smoke.expect || typeof smoke.expect !== "object" || Array.isArray(smoke.expect)) return null;
-  const expect = smoke.expect as Record<string, unknown>;
-  if (
-    !hasExactKeys(expect, ["selector", "text"]) ||
-    typeof expect.selector !== "string" ||
-    typeof expect.text !== "string"
-  ) return null;
-  return {
-    entry: "index.html",
-    smoke: {
+  let normalizedSmoke: ArtifactManifest["smoke"];
+  if (manifest.smoke !== undefined) {
+    if (
+      !manifest.smoke ||
+      typeof manifest.smoke !== "object" ||
+      Array.isArray(manifest.smoke)
+    ) {
+      return null;
+    }
+    const smoke = manifest.smoke as Record<string, unknown>;
+    const actions = parseSmokeActions(smoke);
+    if (!actions) return null;
+    if (
+      !smoke.expect ||
+      typeof smoke.expect !== "object" ||
+      Array.isArray(smoke.expect)
+    ) {
+      return null;
+    }
+    const expect = smoke.expect as Record<string, unknown>;
+    if (
+      !hasExactKeys(expect, ["selector", "text"]) ||
+      typeof expect.selector !== "string" ||
+      typeof expect.text !== "string"
+    ) {
+      return null;
+    }
+    normalizedSmoke = {
       actions,
       expect: { selector: expect.selector, text: expect.text },
-    },
+    };
+  }
+  return {
+    entry: "index.html",
+    ...(normalizedSmoke ? { smoke: normalizedSmoke } : {}),
     ui: { preset: ui.preset },
   };
 }

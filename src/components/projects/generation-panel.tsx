@@ -1,6 +1,12 @@
 "use client";
 
-import { startTransition, useEffect, useRef, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { PreviewFrame } from "@/components/preview/preview-frame";
 import {
@@ -125,6 +131,13 @@ export function GenerationPanel({
   const status = generation.job?.status ?? null;
   const isActive = Boolean(status && activeStatuses.has(status));
   const isRetryable = status === "failed" || status === "cancelled";
+  const handleRuntimeRepairQueued = useCallback(
+    (next: GenerationSnapshot) => {
+      setError(null);
+      setGeneration(next);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!isActive) {
@@ -486,6 +499,7 @@ export function GenerationPanel({
               <PreviewFrame
                 artifactVersionId={displayArtifact.id}
                 files={displayArtifact.files}
+                onRuntimeRepairQueued={handleRuntimeRepairQueued}
                 projectId={projectId}
               />
             </>

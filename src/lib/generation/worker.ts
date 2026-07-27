@@ -13,7 +13,6 @@ import {
   persistGenerationAttempt,
   updateGenerationStatus,
 } from "@/lib/generation/repository";
-import { validateArtifactSmoke } from "@/lib/generation/smoke";
 import {
   ARTIFACT_FILES,
   type ArtifactFiles,
@@ -69,7 +68,6 @@ async function completeFallback(
 ): Promise<boolean> {
   if (!supportsConstrainedFallback(input.buildRequest)) return false;
   const files = validateArtifact(await deterministicProvider.generate(input));
-  await validateArtifactSmoke(files);
   if (
     !(await updateGenerationStatus(
       jobId,
@@ -222,7 +220,6 @@ export async function runGenerationJob(
 
     try {
       const files = validateArtifact(candidate);
-      await validateArtifactSmoke(files);
       await completeGenerationJob(jobId, claim.projectId, files);
     } catch (error) {
       const diagnostic = getValidationDiagnostic(error);

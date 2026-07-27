@@ -6,6 +6,7 @@ import {
   createGenerationJob,
   failGenerationJob,
   persistGenerationAttempt,
+  queueOwnedRuntimeRepair,
   requeueGenerationForRevalidation,
   updateGenerationStatus,
 } from "@/lib/generation/repository";
@@ -273,6 +274,102 @@ describe("generation status and event serialization", () => {
     expect(inserted[1]).toMatchObject({
       message:
         "Attempt 3 rejected: Artifact manifest must satisfy the required contract. Waiting for the next incremental repair.",
+      stage: "repairing",
+    });
+  });
+
+  it("requeues the active completed version with a real-browser diagnostic and persisted candidate", async () => {
+    const files = {
+      "app.js": "requestAnimationFrame(() => undefined);",
+      "index.html": '<canvas id="game"></canvas>',
+      "manifest.json": JSON.stringify({
+        entry: "index.html",
+        ui: { preset: "min-atoms-base" },
+      }),
+      "styles.css": "",
+    };
+    const inserted: unknown[] = [];
+    let selected = 0;
+    let updatedStatus = "";
+    const transaction = {
+      execute: vi.fn(async () => undefined),
+      insert: vi.fn(() => ({
+        values: vi.fn(async (value: unknown) => {
+          inserted.push(value);
+        }),
+      })),
+      select: vi.fn(() => {
+        selected += 1;
+        const rows =
+          selected === 1
+            ? [
+                {
+                  activeArtifactVersionId: "version-1",
+                  artifact: {
+                    files,
+                    id: "version-1",
+                    jobId: "job-1",
+                    projectId: "project-1",
+                  },
+                  job: {
+                    id: "job-1",
+                    projectId: "project-1",
+                    status: "completed",
+                  },
+                },
+              ]
+            : selected === 2
+              ? []
+              : selected === 3
+                ? [{ sequence: 2 }]
+                : [{ sequence: 8 }];
+        const chain: Record<string, unknown> = {};
+        chain.innerJoin = vi.fn(() => chain);
+        chain.where = vi.fn(() => ({
+          limit: vi.fn(async () => rows),
+          orderBy: vi.fn(() => ({
+            limit: vi.fn(async () => rows),
+          })),
+        }));
+        chain.from = vi.fn(() => chain);
+        return chain;
+      }),
+      update: vi.fn(() => ({
+        set: vi.fn((value: { status: string }) => {
+          updatedStatus = value.status;
+          return {
+            where: vi.fn(() => ({
+              returning: vi.fn(async () => [{ id: "job-1" }]),
+            })),
+          };
+        }),
+      })),
+    };
+    mockedGetDb.mockReturnValue({
+      transaction: vi.fn((callback) => callback(transaction)),
+    } as never);
+
+    await expect(
+      queueOwnedRuntimeRepair(
+        "owner-1",
+        "project-1",
+        "version-1",
+        "error: gameLoop is not defined",
+      ),
+    ).resolves.toEqual({ jobId: "job-1", queued: true });
+
+    expect(updatedStatus).toBe("repairing");
+    expect(inserted[0]).toMatchObject({
+      candidateFiles: files,
+      diagnostic:
+        "Real browser Preview failed at runtime: error: gameLoop is not defined",
+      jobId: "job-1",
+      kind: "repair",
+      outcome: "rejected",
+      sequence: 3,
+    });
+    expect(inserted[1]).toMatchObject({
+      jobId: "job-1",
       stage: "repairing",
     });
   });
