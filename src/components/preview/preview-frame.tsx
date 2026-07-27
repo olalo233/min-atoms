@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 
 import type { ArtifactFiles } from "@/lib/generation/types";
 import {
@@ -13,7 +13,7 @@ import type { RuntimeDiagnostic } from "@/lib/generation/runtime-diagnostic";
 import type { GenerationSnapshot } from "@/lib/generation/types";
 import { UI_PRESETS } from "@/lib/generation/ui-presets";
 
-type PreviewFrameProps = {
+export type PreviewFrameProps = {
   artifactVersionId: string;
   files: ArtifactFiles;
   onRuntimeRepairQueued?: (snapshot: GenerationSnapshot) => void;
@@ -45,7 +45,18 @@ async function requestGeneratedAppData(request: PreviewDataRequest): Promise<{ d
   return { data: body.value ?? null };
 }
 
-export function PreviewFrame({
+export function arePreviewFramePropsEqual(
+  previous: PreviewFrameProps,
+  next: PreviewFrameProps,
+): boolean {
+  return (
+    previous.artifactVersionId === next.artifactVersionId &&
+    previous.projectId === next.projectId &&
+    previous.onRuntimeRepairQueued === next.onRuntimeRepairQueued
+  );
+}
+
+function PreviewFrameComponent({
   artifactVersionId,
   files,
   onRuntimeRepairQueued,
@@ -155,6 +166,11 @@ export function PreviewFrame({
     </div>
   );
 }
+
+export const PreviewFrame = memo(
+  PreviewFrameComponent,
+  arePreviewFramePropsEqual,
+);
 
 function buildGeneratedAppDataClient(context: {
   artifactVersionId: string;
