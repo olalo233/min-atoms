@@ -10,18 +10,13 @@ export type ArtifactManifest = {
   ui: { preset: UiPresetName };
 };
 
-export function parseArtifactManifest(
-  value: unknown,
-  options: { allowLegacyUi?: boolean } = {},
-): ArtifactManifest | null {
+export function parseArtifactManifest(value: unknown): ArtifactManifest | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const manifest = value as Record<string, unknown>;
   if (manifest.entry !== "index.html") return null;
   const ui = manifest.ui && typeof manifest.ui === "object" && !Array.isArray(manifest.ui)
     ? manifest.ui as Record<string, unknown>
-    : options.allowLegacyUi && manifest.ui === undefined
-      ? { preset: "min-atoms-base" }
-      : null;
+    : null;
   if (!ui) return null;
   if (!isUiPresetName(ui.preset) || Object.keys(ui).some((key) => key !== "preset")) return null;
   if (!manifest.smoke || typeof manifest.smoke !== "object" || Array.isArray(manifest.smoke)) return null;
@@ -41,12 +36,9 @@ export function parseArtifactManifest(
   };
 }
 
-export function readArtifactManifest(
-  source: string,
-  options?: { allowLegacyUi?: boolean },
-): ArtifactManifest | null {
+export function readArtifactManifest(source: string): ArtifactManifest | null {
   try {
-    return parseArtifactManifest(JSON.parse(source), options);
+    return parseArtifactManifest(JSON.parse(source));
   } catch {
     return null;
   }

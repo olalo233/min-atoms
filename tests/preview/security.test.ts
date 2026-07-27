@@ -32,10 +32,10 @@ describe("preview security boundary", () => {
     expect(files["app.js"]).toContain("window.minAtomsData.set(\"counter\", value)");
   });
 
-  it("keeps legacy artifacts offline with the dependency-free preset", async () => {
+  it("keeps the dependency-free preset offline", async () => {
     const files = await deterministicProvider.generate({ baseArtifact: null, buildRequest: "Make a timer" });
     const manifest = JSON.parse(files["manifest.json"]);
-    delete manifest.ui;
+    manifest.ui = { preset: "min-atoms-base" };
     const document = buildPreviewDocument({
       ...files,
       "manifest.json": JSON.stringify(manifest),

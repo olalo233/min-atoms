@@ -160,9 +160,7 @@ export function buildPreviewDocument(
     projectId: "preview-project",
   },
 ): string {
-  const manifest = readArtifactManifest(files["manifest.json"], {
-    allowLegacyUi: true,
-  });
+  const manifest = readArtifactManifest(files["manifest.json"]);
   if (!manifest) {
     throw new Error("Cannot build a preview from an invalid artifact manifest.");
   }

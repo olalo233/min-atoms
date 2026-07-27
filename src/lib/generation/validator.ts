@@ -76,7 +76,7 @@ export function validateArtifact(input: unknown): ArtifactFiles {
 
   const manifest = readArtifactManifest(files["manifest.json"] as string);
   if (!manifest) {
-    reject("Artifact manifest must be valid JSON.");
+    reject("Artifact manifest must satisfy the required contract.");
   }
   const smokeContract = manifest.smoke;
   const idSelector = /^#[A-Za-z][\w:-]{0,63}$/;

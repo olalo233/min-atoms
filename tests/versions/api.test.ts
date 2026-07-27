@@ -180,7 +180,7 @@ describe("version API contracts", () => {
       files: {
         "app.js": "",
         "index.html": '<button id="increment">Add one</button><output id="count">0</output>',
-        "manifest.json": JSON.stringify({ entry: "index.html", smoke: { action: "click", expect: { selector: "#count", text: "1" }, selector: "#increment" } }),
+        "manifest.json": JSON.stringify({ entry: "index.html", ui: { preset: "min-atoms-base" }, smoke: { action: "click", expect: { selector: "#count", text: "1" }, selector: "#increment" } }),
         "styles.css": "",
       },
       id: "11111111-1111-4111-8111-111111111111",

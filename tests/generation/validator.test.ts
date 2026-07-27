@@ -35,7 +35,7 @@ describe("deterministic artifact contract", () => {
         "manifest.json": "not json",
         "styles.css": "",
       }),
-    ).toThrow("valid JSON");
+    ).toThrow("required contract");
   });
 
   it("accepts only platform-controlled UI presets", () => {
@@ -60,7 +60,7 @@ describe("deterministic artifact contract", () => {
         ...manifest,
         ui: { preset: "untrusted-framework" },
       }),
-    })).toThrow("valid JSON");
+    })).toThrow("required contract");
     expect(() => validateArtifact({
       ...artifact,
       "manifest.json": JSON.stringify({
