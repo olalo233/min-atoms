@@ -5,6 +5,7 @@ import {
   buildRequests,
   generationEvents,
   generationJobs,
+  projectMessages,
   projects,
   type BuildRequest,
   type GenerationJob,
@@ -51,6 +52,14 @@ export async function createProjectWithBuildRequest(
       .insert(buildRequests)
       .values({ projectId: project.id, content })
       .returning();
+    await transaction.insert(projectMessages).values({
+      buildRequestId: buildRequest.id,
+      content,
+      mode: "build",
+      projectId: project.id,
+      role: "user",
+      sequence: 1,
+    });
 
     return { project, buildRequest };
   });
@@ -86,6 +95,10 @@ export async function createOwnedFollowUpGeneration(
         .where(and(eq(projects.id, projectId), eq(projects.ownerId, ownerId)))
         .limit(1);
       if (!project) return null;
+
+      await transaction.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${projectId}))`,
+      );
 
       const [active] = await transaction
         .select({ buildRequest: buildRequests, job: generationJobs })
@@ -144,6 +157,20 @@ export async function createOwnedFollowUpGeneration(
         .insert(buildRequests)
         .values({ baseVersionId, content, projectId })
         .returning();
+      const [lastMessage] = await transaction
+        .select({ sequence: projectMessages.sequence })
+        .from(projectMessages)
+        .where(eq(projectMessages.projectId, projectId))
+        .orderBy(desc(projectMessages.sequence))
+        .limit(1);
+      await transaction.insert(projectMessages).values({
+        buildRequestId: buildRequest.id,
+        content,
+        mode: "build",
+        projectId,
+        role: "user",
+        sequence: (lastMessage?.sequence ?? 0) + 1,
+      });
       const [job] = await transaction
         .insert(generationJobs)
         .values({ baseVersionId, buildRequestId: buildRequest.id, projectId, status: "queued" })

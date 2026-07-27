@@ -47,6 +47,24 @@ export type BaseArtifact = {
 export type GenerationInput = {
   baseArtifact: BaseArtifact | null;
   buildRequest: string;
+  conversation?: ConversationTurn[];
+};
+
+export type ConversationMode = "chat" | "build";
+export type ConversationRole = "user" | "assistant";
+
+export type ConversationTurn = {
+  content: string;
+  mode: ConversationMode;
+  role: ConversationRole;
+  sequence: number;
+};
+
+export type ProjectMessageSnapshot = ConversationTurn & {
+  artifactVersionId: string | null;
+  buildRequestId: string | null;
+  createdAt: string;
+  id: string;
 };
 
 export type GenerationSnapshot = {

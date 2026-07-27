@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { deepSeekProvider } from "@/lib/generation/deepseek";
+import {
+  deepSeekProvider,
+  requestConversationReply,
+} from "@/lib/generation/deepseek";
 
 describe("DeepSeek artifact contract", () => {
   afterEach(() => {
@@ -59,6 +62,118 @@ describe("DeepSeek artifact contract", () => {
     expect(instruction).toContain("never add link or script tags");
     expect(instruction).toContain("expression must be exactly 7+1");
     expect(instruction).toContain("legacy smoke object is allowed but optional");
+  });
+
+  it("sends every persisted conversation turn into artifact generation", async () => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  "app.js": "",
+                  "index.html": "",
+                  "manifest.json": "{}",
+                  "styles.css": "",
+                }),
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deepSeekProvider.generate({
+      baseArtifact: null,
+      buildRequest: "Now add keyboard controls.",
+      conversation: [
+        {
+          content: "Build a snake game.",
+          mode: "build",
+          role: "user",
+          sequence: 1,
+        },
+        {
+          content: "Should it use canvas?",
+          mode: "chat",
+          role: "user",
+          sequence: 2,
+        },
+        {
+          content: "Canvas is a good fit for the playfield.",
+          mode: "chat",
+          role: "assistant",
+          sequence: 3,
+        },
+        {
+          content: "Now add keyboard controls.",
+          mode: "build",
+          role: "user",
+          sequence: 4,
+        },
+      ],
+    });
+
+    const request = JSON.parse(
+      String((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
+    ) as { messages: Array<{ content: string; role: string }> };
+    const instruction = request.messages.find(
+      (message) => message.role === "user",
+    )?.content;
+    expect(instruction).toContain("[Turn 1 · user · build]\nBuild a snake game.");
+    expect(instruction).toContain("[Turn 2 · user · chat]\nShould it use canvas?");
+    expect(instruction).toContain(
+      "[Turn 3 · assistant · chat]\nCanvas is a good fit for the playfield.",
+    );
+    expect(instruction).toContain(
+      "[Turn 4 · user · build]\nNow add keyboard controls.",
+    );
+  });
+
+  it("uses the complete conversation for Chat Mode without requesting an artifact", async () => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "Use Canvas 2D for the game loop." } }],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      requestConversationReply([
+        {
+          content: "Build a snake game.",
+          mode: "build",
+          role: "user",
+          sequence: 1,
+        },
+        {
+          content: "Should it use canvas?",
+          mode: "chat",
+          role: "user",
+          sequence: 2,
+        },
+      ]),
+    ).resolves.toBe("Use Canvas 2D for the game loop.");
+
+    const request = JSON.parse(
+      String((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
+    ) as {
+      messages: Array<{ content: string; role: string }>;
+      response_format?: unknown;
+    };
+    expect(request.response_format).toBeUndefined();
+    expect(request.messages).toEqual(
+      expect.arrayContaining([
+        { content: "[Build Mode]\nBuild a snake game.", role: "user" },
+        { content: "[Chat Mode]\nShould it use canvas?", role: "user" },
+      ]),
+    );
   });
 
   it("requires a repair response to change the rejected candidate", async () => {

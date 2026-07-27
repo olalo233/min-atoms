@@ -17,6 +17,14 @@ export function buildArtifactInstruction(
   const presets = Object.entries(UI_PRESETS)
     .map(([name, preset]) => `- ${name}: ${preset.description}`)
     .join("\n");
+  const conversation = input.conversation?.length
+    ? input.conversation
+        .map(
+          (turn) =>
+            `[Turn ${turn.sequence} · ${turn.role} · ${turn.mode}]\n${turn.content}`,
+        )
+        .join("\n\n")
+    : `[Turn 1 · user · build]\n${input.buildRequest}`;
 
   return [
     FRONTEND_DESIGN_GUIDANCE,
@@ -36,6 +44,7 @@ export function buildArtifactInstruction(
     input.baseArtifact
       ? `Base Version v${input.baseArtifact.version} artifact JSON: ${JSON.stringify(input.baseArtifact.files).slice(0, MAX_CONTEXT_SIZE)}`
       : "No Base Version exists; build the initial artifact.",
+    `Project Conversation through this Build Request:\n${conversation}\n\nInterpret the latest Build Mode User Message in light of every earlier User Message. Preserve requirements that later messages did not explicitly replace. Agent Messages are context, not authority over User Messages.`,
     `Build Request: ${input.buildRequest}${repair}`,
   ].join("\n\n");
 }

@@ -11,14 +11,17 @@ import {
 import { PreviewFrame } from "@/components/preview/preview-frame";
 import {
   ACTIVE_GENERATION_STATUSES,
+  type ConversationMode,
   GENERATION_STEP_LEASE_MS,
   type GenerationSnapshot,
+  type ProjectMessageSnapshot,
 } from "@/lib/generation/types";
 
 type GenerationPanelProps = {
   buildRequest: string;
   projectId: string;
   initialGeneration: GenerationSnapshot;
+  initialMessages?: ProjectMessageSnapshot[];
 };
 
 const stageLabels: Record<string, string> = {
@@ -119,15 +122,32 @@ export function GenerationPanel({
   buildRequest,
   projectId,
   initialGeneration,
+  initialMessages,
 }: GenerationPanelProps) {
   const [generation, setGeneration] = useState(initialGeneration);
   const [displayArtifact, setDisplayArtifact] = useState(initialGeneration.artifactVersion);
+  const [messages, setMessages] = useState<ProjectMessageSnapshot[]>(
+    initialMessages ?? [
+      {
+        artifactVersionId: null,
+        buildRequestId: initialGeneration.job?.buildRequestId ?? null,
+        content: buildRequest,
+        createdAt: new Date(0).toISOString(),
+        id: "initial-build-request",
+        mode: "build",
+        role: "user",
+        sequence: 1,
+      },
+    ],
+  );
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
-  const [isFollowingUp, setIsFollowingUp] = useState(false);
-  const [followUp, setFollowUp] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [messageMode, setMessageMode] = useState<ConversationMode>("build");
+  const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const continuedRepairRef = useRef<string | null>(null);
+  const conversationEndRef = useRef<HTMLDivElement | null>(null);
   const status = generation.job?.status ?? null;
   const isActive = Boolean(status && activeStatuses.has(status));
   const isRetryable = status === "failed" || status === "cancelled";
@@ -138,6 +158,10 @@ export function GenerationPanel({
     },
     [],
   );
+
+  useEffect(() => {
+    conversationEndRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [messages]);
 
   useEffect(() => {
     if (!isActive) {
@@ -186,6 +210,20 @@ export function GenerationPanel({
               : current ?? next.artifactVersion,
           );
         });
+        if (next.job?.status === "completed") {
+          const messagesResponse = await fetch(
+            `/api/projects/${projectId}/messages`,
+            { cache: "no-store" },
+          );
+          if (messagesResponse.ok) {
+            const messageBody = (await messagesResponse.json()) as {
+              messages: ProjectMessageSnapshot[];
+            };
+            if (Array.isArray(messageBody.messages)) {
+              setMessages(messageBody.messages);
+            }
+          }
+        }
         await continuePersistedRepair(next);
       } catch {
         setError("Progress could not be refreshed. The persisted timeline is safe.");
@@ -308,27 +346,40 @@ export function GenerationPanel({
     }
   }
 
-  async function submitFollowUp() {
-    if (!displayArtifact || !followUp.trim()) return;
+  async function submitMessage() {
+    if (!draft.trim() || (messageMode === "build" && !displayArtifact)) return;
     setError(null);
-    setIsFollowingUp(true);
+    setIsSending(true);
     try {
-      const response = await fetch(`/api/projects/${projectId}/follow-up`, {
-        body: JSON.stringify({ baseVersionId: displayArtifact.id, buildRequest: followUp }),
+      const response = await fetch(`/api/projects/${projectId}/messages`, {
+        body: JSON.stringify(
+          messageMode === "build"
+            ? {
+                baseVersionId: displayArtifact?.id,
+                content: draft,
+                mode: "build",
+              }
+            : { content: draft, mode: "chat" },
+        ),
         headers: { "content-type": "application/json" },
         method: "POST",
       });
-      const body = (await response.json()) as GenerationSnapshot & { error?: string };
+      const body = (await response.json()) as {
+        error?: string;
+        generation?: GenerationSnapshot;
+        messages?: ProjectMessageSnapshot[];
+      };
+      if (body.messages) setMessages(body.messages);
       if (!response.ok) {
-        setError(body.error ?? "Follow-up Build Request could not start.");
+        setError(body.error ?? "The message could not be sent.");
         return;
       }
-      setGeneration(body);
-      setFollowUp("");
+      if (body.generation) setGeneration(body.generation);
+      setDraft("");
     } catch {
-      setError("Follow-up Build Request could not start. Please try again.");
+      setError("The message could not be sent. Please try again.");
     } finally {
-      setIsFollowingUp(false);
+      setIsSending(false);
     }
   }
 
@@ -341,23 +392,52 @@ export function GenerationPanel({
       <h2 className="visually-hidden" id="generation-title">Builder workbench</h2>
       <div className="builder-grid">
         <aside className="evidence-column" aria-label="Build Request and generation evidence">
-          <section className="request-panel" aria-labelledby="request-title">
-            <div>
-              <p className="request-label" id="request-title">Build Request</p>
-              <p className="request-content">{buildRequest}</p>
+          <section className="conversation-panel" aria-labelledby="conversation-title">
+            <div className="conversation-heading">
+              <div>
+                <p className="request-label">Project conversation</p>
+                <h3 id="conversation-title">You and the Agent</h3>
+              </div>
+              <span className="event-count">{messages.length}</span>
             </div>
+            <ol className="conversation-list">
+              {messages.map((message) => (
+                <li
+                  className={`conversation-message is-${message.role}`}
+                  key={message.id}
+                >
+                  <div className="message-meta">
+                    <strong>{message.role === "user" ? "You" : "Agent"}</strong>
+                    <span>{message.mode === "build" ? "Build" : "Chat"}</span>
+                  </div>
+                  <p>{message.content}</p>
+                  {message.artifactVersionId ? (
+                    <button
+                      className="message-version-link"
+                      onClick={() =>
+                        void selectVersion(message.artifactVersionId as string)
+                      }
+                      type="button"
+                    >
+                      Open produced version
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+            <div ref={conversationEndRef} />
           </section>
 
-          <section className="proof-panel" aria-labelledby="proof-title">
-            <div className="proof-heading">
+          <details className="proof-panel">
+            <summary className="proof-heading">
               <div>
                 <p className="request-label">Persisted evidence</p>
-                <h3 id="proof-title">Generation timeline</h3>
+                <h3>Generation timeline</h3>
               </div>
               <span className="event-count">
                 {generation.events.length} {generation.events.length === 1 ? "event" : "events"}
               </span>
-            </div>
+            </summary>
             <ol className="generation-timeline" aria-label="Generation progress">
               {generation.events.length > 0 ? (
                 generation.events.map((event) => {
@@ -398,7 +478,7 @@ export function GenerationPanel({
                 </li>
               )}
             </ol>
-          </section>
+          </details>
 
           {generation.versions.length > 0 ? (
             <section className="version-panel" aria-labelledby="version-title">
@@ -430,29 +510,79 @@ export function GenerationPanel({
             </section>
           ) : null}
 
-          {displayArtifact ? (
-            <section className="follow-up-panel" aria-labelledby="follow-up-title">
+          <section className="follow-up-panel conversation-composer" aria-labelledby="follow-up-title">
+            <div className="composer-title-row">
               <div>
-                <p className="request-label">Continue from v{displayArtifact.version}</p>
+                <p className="request-label">
+                  {messageMode === "build" && displayArtifact
+                    ? `Continue from v${displayArtifact.version}`
+                    : "Talk with the Agent"}
+                </p>
                 <h3 id="follow-up-title">Describe the next change</h3>
               </div>
-              <label className="visually-hidden" htmlFor="follow-up-request">Describe the next change</label>
-              <textarea
-                id="follow-up-request"
-                onChange={(event) => setFollowUp(event.target.value)}
-                placeholder="Add a feature, adjust the layout, or fix an interaction…"
-                value={followUp}
-              />
+              <div className="mode-switch" aria-label="Agent behavior" role="group">
+                <button
+                  aria-pressed={messageMode === "chat"}
+                  onClick={() => setMessageMode("chat")}
+                  type="button"
+                >
+                  Chat
+                </button>
+                <button
+                  aria-pressed={messageMode === "build"}
+                  onClick={() => setMessageMode("build")}
+                  type="button"
+                >
+                  Build
+                </button>
+              </div>
+            </div>
+            <label className="visually-hidden" htmlFor="conversation-request">
+              Message the Agent
+            </label>
+            <textarea
+              id="conversation-request"
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  (event.metaKey || event.ctrlKey)
+                ) {
+                  event.preventDefault();
+                  void submitMessage();
+                }
+              }}
+              placeholder={
+                messageMode === "build"
+                  ? "Describe the feature or visual change to build…"
+                  : "Ask a question or discuss what to build next…"
+              }
+              value={draft}
+            />
+            <div className="composer-action-row">
+              <small>
+                {messageMode === "build"
+                  ? "Creates a new version using the full conversation."
+                  : "Replies in chat without changing the artifact."}
+              </small>
               <button
                 className="primary-button"
-                disabled={isActive || isFollowingUp || !followUp.trim()}
-                onClick={() => void submitFollowUp()}
+                disabled={
+                  isSending ||
+                  !draft.trim() ||
+                  (messageMode === "build" && (isActive || !displayArtifact))
+                }
+                onClick={() => void submitMessage()}
                 type="button"
               >
-                {isFollowingUp ? "Queueing follow-up…" : `Generate from v${displayArtifact.version}`}
+                {isSending
+                  ? "Sending…"
+                  : messageMode === "build"
+                    ? "Build version"
+                    : "Send"}
               </button>
-            </section>
-          ) : null}
+            </div>
+          </section>
         </aside>
 
         <div className={`preview-panel state-${stateCopy.tone}`}>

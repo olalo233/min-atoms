@@ -1,5 +1,6 @@
 import type { GenerationProvider } from "@/lib/generation/provider";
 import type { GenerationInput } from "@/lib/generation/types";
+import type { ConversationTurn } from "@/lib/generation/types";
 import {
   buildArtifactInstruction,
   GENERATION_SYSTEM_PROMPT,
@@ -9,6 +10,7 @@ const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash";
 const REQUEST_TIMEOUT_MS = 45_000;
 const MAX_PROVIDER_RESPONSE_SIZE = 180_000;
+const MAX_CHAT_RESPONSE_SIZE = 24_000;
 
 type DeepSeekResponse = {
   choices?: Array<{ message?: { content?: unknown } }>;
@@ -107,5 +109,72 @@ export const deepSeekProvider: GenerationProvider = {
     return requestArtifactOnce(input, candidate, diagnostic);
   },
 };
+
+export async function requestConversationReply(
+  conversation: ConversationTurn[],
+): Promise<string> {
+  const { apiKey, model } = getDeepSeekConfiguration();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(DEEPSEEK_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are the product-building Agent inside min-atoms. Answer the user's questions and discuss the evolving app using the complete Project Conversation. In Chat Mode, do not claim that you changed files or produced a new version. Be concise, concrete, and preserve requirements from earlier User Messages unless a later User Message replaces them.",
+          },
+          ...conversation.map((turn) => ({
+            role: turn.role,
+            content:
+              turn.mode === "build"
+                ? `[Build Mode]\n${turn.content}`
+                : `[Chat Mode]\n${turn.content}`,
+          })),
+        ],
+        max_tokens: 1_500,
+        temperature: 0.4,
+        thinking: { type: "disabled" },
+      }),
+      signal: controller.signal,
+    });
+    const body = await response.text();
+    if (!response.ok) throw new Error(`provider_http_${response.status}`);
+    if (body.length > MAX_PROVIDER_RESPONSE_SIZE) {
+      throw new Error("provider_response_too_large");
+    }
+
+    let payload: DeepSeekResponse;
+    try {
+      payload = JSON.parse(body) as DeepSeekResponse;
+    } catch {
+      throw new Error("provider_invalid_response");
+    }
+    const content = payload.choices?.[0]?.message?.content;
+    if (
+      typeof content !== "string" ||
+      !content.trim() ||
+      content.length > MAX_CHAT_RESPONSE_SIZE
+    ) {
+      throw new Error("provider_invalid_response");
+    }
+    return content.trim();
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("provider_")) {
+      throw error;
+    }
+    throw new Error("provider_unavailable");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 export { DEFAULT_DEEPSEEK_MODEL };

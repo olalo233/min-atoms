@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { GenerationPanel } from "@/components/projects/generation-panel";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getOwnedGenerationSnapshot } from "@/lib/generation/repository";
+import { getOwnedProjectMessages } from "@/lib/projects/messages";
 import { getOwnedProject } from "@/lib/projects/repository";
 
 type ProjectPageProps = {
@@ -17,11 +18,12 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
   }
 
   const { projectId } = await params;
-  const [result, generation] = await Promise.all([
+  const [result, generation, messages] = await Promise.all([
     getOwnedProject(user.id, projectId),
     getOwnedGenerationSnapshot(user.id, projectId),
+    getOwnedProjectMessages(user.id, projectId),
   ]);
-  if (!result || !generation) {
+  if (!result || !generation || !messages) {
     notFound();
   }
 
@@ -47,6 +49,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
       <GenerationPanel
         buildRequest={result.buildRequest.content}
         initialGeneration={generation}
+        initialMessages={messages}
         projectId={projectId}
       />
     </main>

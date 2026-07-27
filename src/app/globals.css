@@ -694,9 +694,9 @@ h3 {
   height: 100%;
   min-width: 0;
   min-height: 0;
-  align-content: start;
+  grid-template-rows: minmax(12rem, 1fr) auto auto auto;
   gap: 0;
-  overflow: auto;
+  overflow: hidden;
   border-right: 1px solid var(--rule);
   background: #fbfbfd;
 }
@@ -712,6 +712,105 @@ h3 {
   padding: 1.15rem 1.25rem;
 }
 
+.conversation-panel {
+  display: flex;
+  grid-row: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border-bottom: 1px solid var(--rule);
+  background: #fbfbfd;
+}
+
+.conversation-heading {
+  display: flex;
+  flex-shrink: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+  padding: 0.9rem 1.1rem 0.8rem;
+}
+
+.conversation-heading h3,
+.conversation-heading .request-label {
+  margin-bottom: 0;
+}
+
+.conversation-list {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0;
+  overflow-y: auto;
+  padding: 1rem 1.1rem;
+  list-style: none;
+  overscroll-behavior: contain;
+}
+
+.conversation-message {
+  width: fit-content;
+  max-width: 92%;
+  border: 1px solid var(--rule);
+  border-radius: 13px;
+  background: var(--surface);
+  padding: 0.7rem 0.8rem;
+  box-shadow: 0 1px 2px rgb(23 21 31 / 3%);
+}
+
+.conversation-message.is-user {
+  align-self: flex-end;
+  border-color: #d9d4fb;
+  background: var(--violet-soft);
+}
+
+.conversation-message.is-assistant {
+  align-self: flex-start;
+}
+
+.message-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+  color: var(--muted);
+  font-family: var(--utility);
+  font-size: 0.58rem;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.message-meta strong {
+  color: var(--ink);
+  font-size: inherit;
+}
+
+.conversation-message p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.52;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.message-version-link {
+  border: 0;
+  background: transparent;
+  color: var(--violet-dark);
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.55rem 0 0;
+}
+
+.message-version-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
 .request-content {
   margin: 0;
   font-size: 0.92rem;
@@ -723,6 +822,27 @@ h3 {
 .proof-panel {
   border-bottom: 1px solid var(--rule);
   padding: 1rem 1.25rem;
+}
+
+details.proof-panel {
+  grid-row: 2;
+  padding: 0;
+}
+
+details.proof-panel > .proof-heading {
+  cursor: pointer;
+  padding: 0.8rem 1.1rem;
+  list-style: none;
+}
+
+details.proof-panel > .proof-heading::-webkit-details-marker {
+  display: none;
+}
+
+details.proof-panel > .generation-timeline {
+  max-height: 15rem;
+  overflow-y: auto;
+  padding: 0.35rem 1.1rem 0.8rem;
 }
 
 .proof-heading {
@@ -1063,6 +1183,10 @@ h3 {
   padding: 1rem 1.25rem;
 }
 
+.evidence-column .version-panel {
+  grid-row: 3;
+}
+
 .sidebar-section-heading {
   display: flex;
   align-items: baseline;
@@ -1079,12 +1203,64 @@ h3 {
 }
 
 .evidence-column .follow-up-panel textarea {
-  min-height: 7rem;
+  min-height: 5rem;
+  max-height: 10rem;
   background: #fbfbfd;
 }
 
 .evidence-column .follow-up-panel .primary-button {
-  width: 100%;
+  flex-shrink: 0;
+}
+
+.conversation-composer {
+  position: relative;
+  z-index: 2;
+  grid-row: 4;
+  box-shadow: 0 -8px 24px rgb(23 21 31 / 5%);
+}
+
+.composer-title-row,
+.composer-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.composer-action-row {
+  align-items: flex-end;
+}
+
+.composer-action-row small {
+  color: var(--muted);
+  font-size: 0.66rem;
+  line-height: 1.4;
+}
+
+.mode-switch {
+  display: inline-flex;
+  flex-shrink: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: 9px;
+  background: var(--surface-muted);
+  padding: 2px;
+}
+
+.mode-switch button {
+  min-height: 1.85rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.35rem 0.55rem;
+}
+
+.mode-switch button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgb(23 21 31 / 10%);
 }
 
 .waiting-register {

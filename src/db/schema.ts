@@ -225,6 +225,50 @@ export const artifactVersions = pgTable(
   ],
 );
 
+export const projectMessages = pgTable(
+  "project_messages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    sequence: integer("sequence").notNull(),
+    role: text("role").$type<"user" | "assistant">().notNull(),
+    mode: text("mode").$type<"chat" | "build">().notNull(),
+    content: text("content").notNull(),
+    buildRequestId: uuid("build_request_id").references(
+      () => buildRequests.id,
+      { onDelete: "set null" },
+    ),
+    artifactVersionId: uuid("artifact_version_id").references(
+      () => artifactVersions.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    check(
+      "project_messages_role_check",
+      sql`${table.role} in ('user', 'assistant')`,
+    ),
+    check(
+      "project_messages_mode_check",
+      sql`${table.mode} in ('chat', 'build')`,
+    ),
+    index("project_messages_project_id_idx").on(table.projectId),
+    index("project_messages_build_request_id_idx").on(table.buildRequestId),
+    uniqueIndex("project_messages_project_sequence_idx").on(
+      table.projectId,
+      table.sequence,
+    ),
+    uniqueIndex("project_messages_build_request_user_idx")
+      .on(table.buildRequestId)
+      .where(sql`${table.role} = 'user' and ${table.buildRequestId} is not null`),
+  ],
+);
+
 export const generatedAppData = pgTable(
   "generated_app_data",
   {
@@ -253,4 +297,5 @@ export type GenerationJob = typeof generationJobs.$inferSelect;
 export type GenerationEvent = typeof generationEvents.$inferSelect;
 export type GenerationAttempt = typeof generationAttempts.$inferSelect;
 export type ArtifactVersion = typeof artifactVersions.$inferSelect;
+export type ProjectMessage = typeof projectMessages.$inferSelect;
 export type GeneratedAppData = typeof generatedAppData.$inferSelect;

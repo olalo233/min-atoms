@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 
 import {
   artifactVersions,
@@ -6,6 +6,7 @@ import {
   generationAttempts,
   generationEvents,
   generationJobs,
+  projectMessages,
   projects,
   type ArtifactVersion,
   type GenerationEvent,
@@ -198,6 +199,8 @@ export async function getGenerationInputForJob(jobId: string): Promise<Generatio
     .select({
       baseVersionId: generationJobs.baseVersionId,
       buildRequest: buildRequests.content,
+      buildRequestId: buildRequests.id,
+      projectId: generationJobs.projectId,
     })
     .from(generationJobs)
     .innerJoin(buildRequests, eq(generationJobs.buildRequestId, buildRequests.id))
@@ -223,7 +226,36 @@ export async function getGenerationInputForJob(jobId: string): Promise<Generatio
     };
   }
 
-  return { baseArtifact, buildRequest: job.buildRequest };
+  const [requestMessage] = await getDb()
+    .select({ sequence: projectMessages.sequence })
+    .from(projectMessages)
+    .where(
+      and(
+        eq(projectMessages.projectId, job.projectId),
+        eq(projectMessages.buildRequestId, job.buildRequestId),
+        eq(projectMessages.role, "user"),
+      ),
+    )
+    .limit(1);
+  const conversation = requestMessage
+    ? await getDb()
+        .select({
+          content: projectMessages.content,
+          mode: projectMessages.mode,
+          role: projectMessages.role,
+          sequence: projectMessages.sequence,
+        })
+        .from(projectMessages)
+        .where(
+          and(
+            eq(projectMessages.projectId, job.projectId),
+            lte(projectMessages.sequence, requestMessage.sequence),
+          ),
+        )
+        .orderBy(asc(projectMessages.sequence))
+    : [];
+
+  return { baseArtifact, buildRequest: job.buildRequest, conversation };
 }
 
 export async function updateGenerationStatus(
@@ -467,7 +499,10 @@ export async function persistGenerationAttempt(
       sql`select pg_advisory_xact_lock(hashtext(${jobIdentity.projectId}))`,
     );
     const [job] = await transaction
-      .select({ status: generationJobs.status })
+      .select({
+        buildRequestId: generationJobs.buildRequestId,
+        status: generationJobs.status,
+      })
       .from(generationJobs)
       .where(eq(generationJobs.id, attempt.jobId))
       .limit(1);
@@ -562,7 +597,10 @@ export async function completeGenerationJob(
       sql`select pg_advisory_xact_lock(hashtext(${projectId}))`,
     );
     const [job] = await transaction
-      .select({ status: generationJobs.status })
+      .select({
+        buildRequestId: generationJobs.buildRequestId,
+        status: generationJobs.status,
+      })
       .from(generationJobs)
       .where(eq(generationJobs.id, jobId))
       .limit(1);
@@ -611,6 +649,21 @@ export async function completeGenerationJob(
       .update(projects)
       .set({ activeArtifactVersionId: artifactVersion.id, updatedAt: new Date() })
       .where(eq(projects.id, projectId));
+    const [lastMessage] = await transaction
+      .select({ sequence: projectMessages.sequence })
+      .from(projectMessages)
+      .where(eq(projectMessages.projectId, projectId))
+      .orderBy(desc(projectMessages.sequence))
+      .limit(1);
+    await transaction.insert(projectMessages).values({
+      artifactVersionId: artifactVersion.id,
+      buildRequestId: job.buildRequestId,
+      content: `Version ${version} is ready in Preview.`,
+      mode: "build",
+      projectId,
+      role: "assistant",
+      sequence: (lastMessage?.sequence ?? 0) + 1,
+    });
 
     return artifactVersion;
   });
