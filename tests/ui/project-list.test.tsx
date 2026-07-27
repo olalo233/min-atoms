@@ -16,12 +16,14 @@ vi.mock("next/link", () => ({
   default: ({
     children,
     href,
+    prefetch,
     ...rest
   }: {
     children: ReactNode;
     href: string;
+    prefetch?: boolean;
   }) => (
-    <a href={href} {...rest}>
+    <a data-prefetch={String(prefetch)} href={href} {...rest}>
       {children}
     </a>
   ),
@@ -77,6 +79,7 @@ describe("ProjectList", () => {
     render(<ProjectList projects={projects} />);
 
     const firstProject = screen.getAllByRole("link")[0];
+    expect(firstProject).toHaveAttribute("data-prefetch", "false");
     fireEvent.pointerEnter(firstProject);
     fireEvent.focus(firstProject);
 

@@ -87,7 +87,7 @@ export function ProjectList({ projects }: ProjectListProps) {
                 href={`/projects/${project.id}`}
                 onFocus={() => prefetchProject(project.id)}
                 onPointerEnter={() => prefetchProject(project.id)}
-                prefetch
+                prefetch={false}
               >
                 <span className="project-card-name">{project.name}</span>
                 <span className="project-card-meta">
