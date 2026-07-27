@@ -74,6 +74,35 @@ describe("durable generation worker", () => {
     expect(repository.persistGenerationAttempt).not.toHaveBeenCalled();
   });
 
+  it("revalidates a persisted failed candidate without another provider call", async () => {
+    repository.claimGenerationStep.mockResolvedValue({
+      mode: "revalidate",
+      projectId: "project-revalidate",
+      requiresGenerateTransition: false,
+    });
+    repository.getGenerationStepInput.mockResolvedValue({
+      attemptCount: 10,
+      candidate: files,
+      diagnostic: "Artifact file index.html uses a forbidden capability.",
+      input: { baseArtifact: null, buildRequest: "Build a blog" },
+    });
+    const provider: GenerationProvider = {
+      generate: vi.fn(),
+      repair: vi.fn(),
+    };
+
+    await runGenerationJob("job-revalidate", provider);
+
+    expect(provider.generate).not.toHaveBeenCalled();
+    expect(provider.repair).not.toHaveBeenCalled();
+    expect(repository.updateGenerationStatus).not.toHaveBeenCalled();
+    expect(repository.completeGenerationJob).toHaveBeenCalledWith(
+      "job-revalidate",
+      "project-revalidate",
+      files,
+    );
+  });
+
   it("persists an invalid candidate and stops without repairing in the same invocation", async () => {
     const invalid = { ...files, "manifest.json": "{}" };
     repository.claimGenerationStep.mockResolvedValue({
@@ -180,6 +209,43 @@ describe("durable generation worker", () => {
       outcome: "provider_failed",
       providerError: "provider_invalid_response",
     });
+    expect(repository.completeGenerationJob).not.toHaveBeenCalled();
+  });
+
+  it("stops an unchanged incremental repair instead of spending more attempts", async () => {
+    const invalid = { ...files, "manifest.json": "{}" };
+    repository.claimGenerationStep.mockResolvedValue({
+      mode: "repair",
+      projectId: "project-stalled",
+      requiresGenerateTransition: false,
+    });
+    repository.getGenerationStepInput.mockResolvedValue({
+      attemptCount: 3,
+      candidate: invalid,
+      diagnostic: "Artifact manifest must satisfy the required contract.",
+      input: { baseArtifact: null, buildRequest: "Build a blog" },
+    });
+    const provider: GenerationProvider = {
+      generate: vi.fn(),
+      repair: vi.fn().mockResolvedValue({
+        operations: [
+          {
+            content: "{}",
+            op: "replace-file",
+            path: "manifest.json",
+          },
+        ],
+      }),
+    };
+
+    await runGenerationJob("job-stalled", provider);
+
+    expect(repository.failGenerationJob).toHaveBeenCalledWith(
+      "job-stalled",
+      "artifact_stalled",
+      "Artifact manifest must satisfy the required contract.",
+    );
+    expect(repository.persistGenerationAttempt).not.toHaveBeenCalled();
     expect(repository.completeGenerationJob).not.toHaveBeenCalled();
   });
 

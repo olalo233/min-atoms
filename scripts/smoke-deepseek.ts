@@ -1,4 +1,6 @@
 import { deepSeekProvider } from "../src/lib/generation/deepseek";
+import { applyArtifactRepair } from "../src/lib/generation/patch";
+import type { ArtifactFiles } from "../src/lib/generation/types";
 import {
   getValidationDiagnostic,
   validateArtifact,
@@ -24,7 +26,8 @@ async function main() {
     if (!deepSeekProvider.repair) {
       throw new Error("artifact_invalid");
     }
-    artifact = await deepSeekProvider.repair(input, artifact, diagnostic);
+    const patch = await deepSeekProvider.repair(input, artifact, diagnostic);
+    artifact = applyArtifactRepair(artifact as ArtifactFiles, patch).files;
   }
 
   try {

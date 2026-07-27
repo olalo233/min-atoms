@@ -42,7 +42,9 @@ describe("DeepSeek artifact contract", () => {
       (message) => message.role === "user",
     )?.content;
 
-    expect(instruction).toContain("fully self-contained");
+    expect(instruction).toContain("Use normal semantic HTML");
+    expect(instruction).toContain("Preview sandbox and Content Security Policy");
+    expect(instruction).toContain("Do not weaken the requested product");
     expect(instruction).toContain("Do not rely on undeclared globals");
     expect(instruction).toContain("Markdown");
     expect(instruction).toContain("without external libraries");

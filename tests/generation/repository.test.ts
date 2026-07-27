@@ -6,6 +6,7 @@ import {
   createGenerationJob,
   failGenerationJob,
   persistGenerationAttempt,
+  requeueGenerationForRevalidation,
   updateGenerationStatus,
 } from "@/lib/generation/repository";
 
@@ -272,6 +273,64 @@ describe("generation status and event serialization", () => {
     expect(inserted[1]).toMatchObject({
       message:
         "Attempt 3 persisted. Waiting for the next incremental repair.",
+      stage: "repairing",
+    });
+  });
+
+  it("requeues an artifact-invalid job and records platform revalidation", async () => {
+    let selectCount = 0;
+    const insertedEvents: Array<{ message: string; stage: string }> = [];
+    const requeuedJob = {
+      errorMessage: "artifact_invalid",
+      id: "job-1",
+      projectId: "project-1",
+      status: "repairing",
+    };
+    const transaction = {
+      execute: vi.fn(async () => undefined),
+      insert: vi.fn(() => ({
+        values: vi.fn(async (value: { message: string; stage: string }) => {
+          insertedEvents.push(value);
+        }),
+      })),
+      select: vi.fn(() => {
+        selectCount += 1;
+        const rows =
+          selectCount === 1
+            ? [{ projectId: "project-1" }]
+            : [{ sequence: 32 }];
+        return {
+          from: vi.fn(() => ({
+            where: vi.fn(() =>
+              selectCount === 1
+                ? { limit: vi.fn(async () => rows) }
+                : {
+                    orderBy: vi.fn(() => ({
+                      limit: vi.fn(async () => rows),
+                    })),
+                  },
+            ),
+          })),
+        };
+      }),
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({
+          where: vi.fn(() => ({
+            returning: vi.fn(async () => [requeuedJob]),
+          })),
+        })),
+      })),
+    };
+    mockedGetDb.mockReturnValue({
+      transaction: vi.fn((callback) => callback(transaction)),
+    } as never);
+
+    await expect(
+      requeueGenerationForRevalidation("job-1"),
+    ).resolves.toBe(requeuedJob);
+    expect(insertedEvents).toHaveLength(1);
+    expect(insertedEvents[0]).toMatchObject({
+      message: "Latest persisted candidate queued for platform revalidation.",
       stage: "repairing",
     });
   });

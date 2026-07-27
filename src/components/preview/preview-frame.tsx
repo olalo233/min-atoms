@@ -44,6 +44,8 @@ async function requestGeneratedAppData(request: PreviewDataRequest): Promise<{ d
 
 export function PreviewFrame({ artifactVersionId, files, projectId }: PreviewFrameProps) {
   const bridgeReadyRef = useRef(false);
+  const loadedSrcDocRef = useRef<string | null>(null);
+  const previewDocumentActiveRef = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const srcDoc = useMemo(
     () => buildPreviewDocument(files, { artifactVersionId, projectId }),
@@ -62,33 +64,49 @@ export function PreviewFrame({ artifactVersionId, files, projectId }: PreviewFra
       "*",
     );
   }, [artifactVersionId, projectId]);
+  const handleFrameLoad = useCallback(() => {
+    if (loadedSrcDocRef.current === srcDoc) {
+      previewDocumentActiveRef.current = false;
+      bridgeReadyRef.current = false;
+      return;
+    }
+    loadedSrcDocRef.current = srcDoc;
+    previewDocumentActiveRef.current = true;
+    announceBridgeReady();
+  }, [announceBridgeReady, srcDoc]);
 
   useEffect(() => {
+    const alreadyLoaded = loadedSrcDocRef.current === srcDoc;
+    previewDocumentActiveRef.current = alreadyLoaded;
     const stop = createPreviewBridge({
       artifactVersionId,
       host: window as unknown as PreviewBridgeHost,
       iframeWindow: () => iframeRef.current?.contentWindow ?? null,
+      isActiveDocument: () => previewDocumentActiveRef.current,
       platformRequest: requestGeneratedAppData,
       projectId,
     });
     bridgeReadyRef.current = true;
-    announceBridgeReady();
+    if (alreadyLoaded) {
+      announceBridgeReady();
+    }
     return () => {
       bridgeReadyRef.current = false;
+      previewDocumentActiveRef.current = false;
       stop();
     };
-  }, [announceBridgeReady, artifactVersionId, projectId]);
+  }, [announceBridgeReady, artifactVersionId, projectId, srcDoc]);
 
   return (
     <div className="preview-frame-wrap">
       <div className="preview-toolbar">
         <span className="preview-registration" aria-hidden="true">A-01</span>
         <span>Interactive Preview</span>
-        <span className="preview-lock">Sandboxed · controlled assets</span>
+        <span className="preview-lock">Sandboxed · owner-scoped data</span>
       </div>
       <iframe
         className="preview-frame"
-        onLoad={announceBridgeReady}
+        onLoad={handleFrameLoad}
         ref={iframeRef}
         referrerPolicy="no-referrer"
         sandbox={PREVIEW_SANDBOX}
@@ -183,5 +201,5 @@ export function buildPreviewDocument(
     ? `<link rel="stylesheet" href="${stylesheet.url}"${stylesheet.integrity ? ` integrity="${stylesheet.integrity}"` : ""} crossorigin="${stylesheet.crossOrigin}">`
     : "";
 
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}">${presetLink}<style>${files["styles.css"].replaceAll("</style", "<\\/style")}</style></head><body>${files["index.html"]}<script>${buildGeneratedAppDataClient(context).replaceAll("</script", "<\\/script")}</script><script>${files["app.js"].replaceAll("</script", "<\\/script")}</script></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><base href="about:srcdoc"><meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}">${presetLink}<style>${files["styles.css"].replaceAll("</style", "<\\/style")}</style></head><body>${files["index.html"]}<script>${buildGeneratedAppDataClient(context).replaceAll("</script", "<\\/script")}</script><script>${files["app.js"].replaceAll("</script", "<\\/script")}</script></body></html>`;
 }

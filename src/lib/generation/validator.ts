@@ -3,25 +3,6 @@ import { readArtifactManifest } from "@/lib/generation/manifest";
 
 const MAX_FILE_SIZE = 40_000;
 const MAX_DIAGNOSTIC_SIZE = 640;
-const FORBIDDEN_CONTENT = [
-  /https?:\/\//i,
-  /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|importScripts)\s*\(/i,
-  /\b(?:window\.open|Worker|SharedWorker)\s*\(/i,
-  /\bnavigator\.(?:mediaDevices|geolocation|permissions|serviceWorker|sendBeacon)\b/i,
-  /\bimport\s*\(/i,
-  /<\s*(?:base|embed|form|iframe|link|object|script)\b/i,
-  /<\s*meta\b[^>]*http-equiv/i,
-  /@import\b/i,
-  /\burl\s*\(/i,
-  /\b(?:src|href)\s*=/i,
-];
-const FORBIDDEN_SCRIPT_CONTENT = [
-  /\b(?:eval|process|require|module|global|Buffer)\b/i,
-  /\bFunction\b/,
-  /\b__proto__\b/i,
-  /\.\s*(?:constructor|prototype)\b/i,
-  /\[\s*["'](?:constructor|prototype|__proto__)["']\s*\]/i,
-];
 
 export class ArtifactValidationError extends Error {
   readonly category = "artifact_invalid";
@@ -65,16 +46,6 @@ export function validateArtifact(input: unknown): ArtifactFiles {
       findings.push(`Artifact file ${name} is invalid.`);
       continue;
     }
-    if (FORBIDDEN_CONTENT.some((pattern) => pattern.test(value))) {
-      findings.push(`Artifact file ${name} uses a forbidden capability.`);
-    }
-  }
-  if (typeof files["app.js"] === "string" &&
-    FORBIDDEN_SCRIPT_CONTENT.some((pattern) =>
-      pattern.test(files["app.js"] as string),
-    )
-  ) {
-    findings.push("Artifact app.js uses a forbidden runtime escape.");
   }
 
   const manifest = typeof files["manifest.json"] === "string"

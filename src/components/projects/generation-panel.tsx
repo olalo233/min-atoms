@@ -44,6 +44,9 @@ function getFailureDetail(errorMessage: string | null | undefined) {
   if (errorMessage === "generation_failed") {
     return "Generation stopped before an artifact could be accepted.";
   }
+  if (errorMessage === "artifact_stalled") {
+    return "The incremental repair did not change the candidate, so the agent stopped instead of spending more attempts.";
+  }
   return errorMessage ?? "Generation failed validation.";
 }
 

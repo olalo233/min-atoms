@@ -11,7 +11,10 @@ import {
   type Project,
 } from "@/db/schema";
 import { getDb } from "@/lib/db/client";
-import { createGenerationJob } from "@/lib/generation/repository";
+import {
+  createGenerationJob,
+  requeueGenerationForRevalidation,
+} from "@/lib/generation/repository";
 import { ACTIVE_GENERATION_STATUSES } from "@/lib/generation/types";
 
 const PROJECT_NAME_LIMIT = 72;
@@ -194,6 +197,13 @@ export async function retryOwnedGeneration(
   // Version for the same request.
   if (latest.job.status !== "failed" && latest.job.status !== "cancelled") {
     return latest.job;
+  }
+  if (
+    latest.job.status === "failed" &&
+    latest.job.errorMessage === "artifact_invalid"
+  ) {
+    const requeued = await requeueGenerationForRevalidation(latest.job.id);
+    if (requeued) return requeued;
   }
 
   return createGenerationJob(

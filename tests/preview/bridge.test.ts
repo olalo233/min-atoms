@@ -107,4 +107,28 @@ describe("Preview bridge", () => {
     });
     stop();
   });
+
+  it("rejects data access after the Preview document has navigated", async () => {
+    const iframeWindow = {} as Window;
+    const platformRequest = vi.fn(async () => ({ data: 2 }));
+    const harness = createHost();
+    const stop = createPreviewBridge({
+      artifactVersionId: "version-1",
+      host: harness.host,
+      iframeWindow: () => iframeWindow,
+      isActiveDocument: () => false,
+      platformRequest,
+      projectId: "project-1",
+    });
+
+    harness.emit({
+      data: request("get"),
+      origin: "null",
+      source: iframeWindow,
+    } as MessageEvent);
+    await Promise.resolve();
+
+    expect(platformRequest).not.toHaveBeenCalled();
+    stop();
+  });
 });

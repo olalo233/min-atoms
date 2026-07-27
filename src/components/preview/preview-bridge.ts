@@ -20,6 +20,7 @@ type PreviewBridgeOptions = {
   artifactVersionId: string;
   host: PreviewBridgeHost;
   iframeWindow: () => Window | null;
+  isActiveDocument?: () => boolean;
   platformRequest: (request: PreviewDataRequest) => Promise<{ data?: unknown }>;
   projectId: string;
   respond?: (target: Window, response: PreviewBridgeResponse) => void;
@@ -37,6 +38,7 @@ export function createPreviewBridge(options: PreviewBridgeOptions): () => void {
     if (
       !source ||
       source !== options.iframeWindow() ||
+      options.isActiveDocument?.() === false ||
       event.origin !== "null"
     ) {
       return;

@@ -55,6 +55,10 @@ function readCandidate(input: unknown): ArtifactFiles | null {
   ) as ArtifactFiles;
 }
 
+function artifactsEqual(left: ArtifactFiles, right: ArtifactFiles): boolean {
+  return ARTIFACT_FILES.every((path) => left[path] === right[path]);
+}
+
 async function completeFallback(
   jobId: string,
   projectId: string,
@@ -133,39 +137,56 @@ export async function runGenerationJob(
 
     let candidate: ArtifactFiles;
     let repairPatch: ArtifactRepairPatch | undefined;
-    try {
-      if (claim.mode === "repair") {
-        if (!step.candidate || !provider.repair) {
-          throw new Error("provider_unavailable");
-        }
-        const response = await provider.repair(
-          step.input,
-          step.candidate,
-          step.diagnostic ?? "Continue improving the constrained artifact.",
-        );
-        const repaired = applyArtifactRepair(step.candidate, response);
-        candidate = repaired.files;
-        repairPatch = repaired.patch;
-      } else {
-        const response = await provider.generate(step.input);
-        const generated = readCandidate(response);
-        if (!generated) throw new Error("provider_invalid_response");
-        candidate = generated;
+    if (claim.mode === "revalidate") {
+      if (!step.candidate) {
+        await failGenerationJob(jobId, "artifact_invalid");
+        return;
       }
-    } catch (error) {
-      await persistProviderFailure(
-        jobId,
-        claim.projectId,
-        step.input,
-        step.attemptCount,
-        claim.mode,
-        step.candidate,
-        error,
-      );
-      return;
+      candidate = step.candidate;
+    } else {
+      try {
+        if (claim.mode === "repair") {
+          if (!step.candidate || !provider.repair) {
+            throw new Error("provider_unavailable");
+          }
+          const response = await provider.repair(
+            step.input,
+            step.candidate,
+            step.diagnostic ?? "Continue improving the constrained artifact.",
+          );
+          const repaired = applyArtifactRepair(step.candidate, response);
+          if (artifactsEqual(step.candidate, repaired.files)) {
+            await failGenerationJob(
+              jobId,
+              "artifact_stalled",
+              step.diagnostic ?? undefined,
+            );
+            return;
+          }
+          candidate = repaired.files;
+          repairPatch = repaired.patch;
+        } else {
+          const response = await provider.generate(step.input);
+          const generated = readCandidate(response);
+          if (!generated) throw new Error("provider_invalid_response");
+          candidate = generated;
+        }
+      } catch (error) {
+        await persistProviderFailure(
+          jobId,
+          claim.projectId,
+          step.input,
+          step.attemptCount,
+          claim.mode,
+          step.candidate,
+          error,
+        );
+        return;
+      }
     }
 
     if (
+      claim.mode !== "revalidate" &&
       !(await updateGenerationStatus(
         jobId,
         "generating",
@@ -200,7 +221,7 @@ export async function runGenerationJob(
         diagnostic,
         expectedStatus: "validating",
         jobId,
-        kind: claim.mode,
+        kind: claim.mode === "generate" ? "generate" : "repair",
         outcome: "rejected",
         repairPatch,
       });

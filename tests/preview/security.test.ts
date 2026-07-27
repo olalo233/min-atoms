@@ -18,6 +18,10 @@ describe("preview security boundary", () => {
     const files = await deterministicProvider.generate({ baseArtifact: null, buildRequest: "Make a timer" });
     const document = buildPreviewDocument(files);
 
+    expect(document).toContain('<base href="about:srcdoc">');
+    expect(document.indexOf('<base href="about:srcdoc">')).toBeLessThan(
+      document.indexOf('http-equiv="Content-Security-Policy"'),
+    );
     expect(document).toContain("default-src 'none'");
     expect(document).toContain("connect-src 'none'");
     expect(document).toContain("frame-src 'none'");

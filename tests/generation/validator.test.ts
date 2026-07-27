@@ -70,7 +70,7 @@ describe("deterministic artifact contract", () => {
         ...manifest,
         ui: { preset: "pico-2", url: "https://untrusted.example/framework.css" },
       }),
-    })).toThrow("forbidden capability");
+    })).toThrow("required contract");
   });
 
   it("escapes the request before placing it in generated HTML", async () => {
@@ -89,7 +89,7 @@ describe("deterministic artifact contract", () => {
     await expect(validateArtifactSmoke(validateArtifact(artifact))).resolves.toBeUndefined();
   });
 
-  it("rejects forbidden network capabilities and malformed JavaScript", () => {
+  it("leaves browser capability containment to Preview while checking syntax", () => {
     const valid = {
       "app.js": "const result = document.querySelector('#result');",
       "index.html": "<button id=\"go\">Go</button><output id=\"result\">0</output>",
@@ -105,21 +105,45 @@ describe("deterministic artifact contract", () => {
       "styles.css": ".app { color: black; }",
     };
 
-    expect(() =>
-      validateArtifact({ ...valid, "app.js": "fetch('https://example.test')" }),
-    ).toThrow("forbidden capability");
+    expect(
+      validateArtifact({
+        ...valid,
+        "app.js":
+          "fetch('https://example.test'); window.open('https://example.test');",
+        "index.html":
+          '<form action="https://example.test"><a href="https://example.test"><img src="https://example.test/image.png" alt="">Open</a></form><script>document.body.dataset.inline = "yes"</script>',
+      }),
+    ).toMatchObject({
+      "app.js": expect.stringContaining("fetch"),
+      "index.html": expect.stringContaining("href"),
+    });
     expect(() => validateArtifact({ ...valid, "app.js": "const = ;" })).toThrow(
       "parseable JavaScript",
     );
     expect(() =>
-      validateArtifact({
-        ...valid,
-        "index.html": "<script>document.body.textContent = 'unsafe'</script>",
-      }),
-    ).toThrow("forbidden capability");
-    expect(() =>
       validateArtifact({ ...valid, "styles.css": "} .app {" }),
     ).toThrow("balanced blocks");
+  });
+
+  it("allows self-contained fragment navigation inside a generated SPA", () => {
+    const artifact = {
+      "app.js":
+        "document.querySelector('#go')?.addEventListener('click', () => { document.querySelector('#result').textContent = '1'; });",
+      "index.html":
+        '<nav><a href="#">Home</a><a href="#blog">Blog</a></nav><svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M0 0h1v1H0z"></path></svg><section id="home"><button id="go">Go</button><output id="result">0</output></section><section id="blog">Posts</section>',
+      "manifest.json": JSON.stringify({
+        entry: "index.html",
+        ui: { preset: "min-atoms-base" },
+        smoke: {
+          action: "click",
+          expect: { selector: "#result", text: "1" },
+          selector: "#go",
+        },
+      }),
+      "styles.css": "section { min-height: 10rem; }",
+    };
+
+    expect(validateArtifact(artifact)).toEqual(artifact);
   });
 
   it("reports all deterministic findings in one bounded repair diagnostic", () => {
@@ -135,14 +159,13 @@ describe("deterministic artifact contract", () => {
       diagnostic = getValidationDiagnostic(error);
     }
 
-    expect(diagnostic).toContain("index.html uses a forbidden capability");
     expect(diagnostic).toContain("manifest must satisfy the required contract");
     expect(diagnostic).toContain("app.js must be parseable JavaScript");
     expect(diagnostic).toContain("styles.css must have balanced blocks");
     expect(diagnostic.length).toBeLessThanOrEqual(640);
   });
 
-  it("allows class constructors while blocking constructor-chain escapes", () => {
+  it("leaves runtime escape containment to the sandbox CSP", () => {
     const valid = {
       "app.js": "class Calculator { constructor() { this.value = 0; } }",
       "index.html": "<button id=\"go\">Go</button><output id=\"result\">0</output>",
@@ -159,17 +182,13 @@ describe("deterministic artifact contract", () => {
     };
 
     expect(validateArtifact(valid)).toEqual(valid);
-    expect(() =>
+    expect(
       validateArtifact({
         ...valid,
         "app.js": "({}).constructor.constructor('return globalThis')()",
       }),
-    ).toThrow("forbidden runtime escape");
-    expect(() =>
-      validateArtifact({
-        ...valid,
-        "app.js": "const escape = value['prototype'];",
-      }),
-    ).toThrow("forbidden runtime escape");
+    ).toMatchObject({
+      "app.js": expect.stringContaining("constructor.constructor"),
+    });
   });
 });

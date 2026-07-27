@@ -27,7 +27,7 @@ import { validateArtifact } from "@/lib/generation/validator";
 export const MAX_GENERATION_ATTEMPTS = 10;
 
 export type GenerationStepClaim = {
-  mode: "generate" | "repair";
+  mode: "generate" | "repair" | "revalidate";
   projectId: string;
   requiresGenerateTransition: boolean;
 };
@@ -265,6 +265,49 @@ export async function claimGenerationJob(jobId: string): Promise<boolean> {
   );
 }
 
+export async function requeueGenerationForRevalidation(
+  jobId: string,
+): Promise<GenerationJob | null> {
+  return getDb().transaction(async (transaction) => {
+    const [identity] = await transaction
+      .select({ projectId: generationJobs.projectId })
+      .from(generationJobs)
+      .where(eq(generationJobs.id, jobId))
+      .limit(1);
+    if (!identity) return null;
+
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${identity.projectId}))`,
+    );
+    const [updated] = await transaction
+      .update(generationJobs)
+      .set({ status: "repairing", updatedAt: new Date() })
+      .where(
+        and(
+          eq(generationJobs.id, jobId),
+          eq(generationJobs.status, "failed"),
+          eq(generationJobs.errorMessage, "artifact_invalid"),
+        ),
+      )
+      .returning();
+    if (!updated) return null;
+
+    const [lastEvent] = await transaction
+      .select({ sequence: generationEvents.sequence })
+      .from(generationEvents)
+      .where(eq(generationEvents.jobId, jobId))
+      .orderBy(desc(generationEvents.sequence))
+      .limit(1);
+    await transaction.insert(generationEvents).values({
+      jobId,
+      message: "Latest persisted candidate queued for platform revalidation.",
+      sequence: (lastEvent?.sequence ?? 0) + 1,
+      stage: "repairing",
+    });
+    return updated;
+  });
+}
+
 export async function claimGenerationStep(
   jobId: string,
 ): Promise<GenerationStepClaim | null> {
@@ -281,6 +324,7 @@ export async function claimGenerationStep(
     );
     const [job] = await transaction
       .select({
+        errorMessage: generationJobs.errorMessage,
         projectId: generationJobs.projectId,
         status: generationJobs.status,
         updatedAt: generationJobs.updatedAt,
@@ -296,13 +340,6 @@ export async function claimGenerationStep(
         job.status as (typeof ACTIVE_GENERATION_STATUSES)[number],
       ) &&
       Date.now() - job.updatedAt.getTime() >= GENERATION_STEP_LEASE_MS;
-    if (
-      job.status !== "queued" &&
-      job.status !== "repairing" &&
-      !leaseExpired
-    ) {
-      return null;
-    }
 
     const [latestCandidate] = await transaction
       .select({ candidateFiles: generationAttempts.candidateFiles })
@@ -315,8 +352,29 @@ export async function claimGenerationStep(
       )
       .orderBy(desc(generationAttempts.sequence))
       .limit(1);
-    const mode = latestCandidate?.candidateFiles ? "repair" : "generate";
-    const status = job.status === "queued" ? "planning" : "generating";
+    const canRevalidate =
+      job.status === "repairing" &&
+      job.errorMessage === "artifact_invalid" &&
+      Boolean(latestCandidate?.candidateFiles);
+    if (
+      job.status !== "queued" &&
+      job.status !== "repairing" &&
+      !leaseExpired &&
+      !canRevalidate
+    ) {
+      return null;
+    }
+    const mode = canRevalidate
+      ? "revalidate"
+      : latestCandidate?.candidateFiles
+        ? "repair"
+        : "generate";
+    const status =
+      mode === "revalidate"
+        ? "validating"
+        : job.status === "queued"
+          ? "planning"
+          : "generating";
     const [updated] = await transaction
       .update(generationJobs)
       .set({ status, updatedAt: new Date() })
@@ -337,6 +395,8 @@ export async function claimGenerationStep(
       message:
         status === "planning"
           ? "Planning the constrained artifact."
+          : mode === "revalidate"
+            ? "Revalidating the latest persisted candidate against the current platform contract."
           : leaseExpired
             ? "Recovering an expired generation step from persisted state."
           : mode === "repair"

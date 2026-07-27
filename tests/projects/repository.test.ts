@@ -7,13 +7,22 @@ import {
   retryOwnedGeneration,
 } from "@/lib/projects/repository";
 import { getDb } from "@/lib/db/client";
-import { createGenerationJob } from "@/lib/generation/repository";
+import {
+  createGenerationJob,
+  requeueGenerationForRevalidation,
+} from "@/lib/generation/repository";
 
 vi.mock("@/lib/db/client", () => ({ getDb: vi.fn() }));
-vi.mock("@/lib/generation/repository", () => ({ createGenerationJob: vi.fn() }));
+vi.mock("@/lib/generation/repository", () => ({
+  createGenerationJob: vi.fn(),
+  requeueGenerationForRevalidation: vi.fn(),
+}));
 
 const mockedGetDb = vi.mocked(getDb);
 const mockedCreateGenerationJob = vi.mocked(createGenerationJob);
+const mockedRequeueGeneration = vi.mocked(
+  requeueGenerationForRevalidation,
+);
 
 function latestJobQuery(job: { buildRequestId: string; projectId: string; baseVersionId: string | null; status: string }) {
   const limit = vi.fn().mockResolvedValue([{ job }]);
@@ -124,6 +133,29 @@ describe("project request contracts", () => {
       "request-1",
       "version-1",
     );
+  });
+
+  it("reuses an artifact-invalid job so its persisted candidate can be revalidated", async () => {
+    const failedJob = {
+      baseVersionId: null,
+      buildRequestId: "request-1",
+      errorMessage: "artifact_invalid",
+      id: "job-1",
+      projectId: "project-1",
+      status: "failed",
+    };
+    mockedGetDb.mockReturnValue(latestJobQuery(failedJob) as never);
+    mockedRequeueGeneration.mockResolvedValue({
+      ...failedJob,
+      status: "repairing",
+    } as never);
+
+    await expect(
+      retryOwnedGeneration("owner-1", "project-1"),
+    ).resolves.toMatchObject({ id: "job-1", status: "repairing" });
+
+    expect(mockedRequeueGeneration).toHaveBeenCalledWith("job-1");
+    expect(mockedCreateGenerationJob).not.toHaveBeenCalled();
   });
 
   it("creates a retry when the latest generation was cancelled", async () => {
