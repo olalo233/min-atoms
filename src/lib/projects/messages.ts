@@ -35,6 +35,12 @@ export async function getOwnedProjectMessages(
     .limit(1);
   if (!ownedProject) return null;
 
+  return getProjectMessages(projectId);
+}
+
+export async function getProjectMessages(
+  projectId: string,
+): Promise<ProjectMessageSnapshot[]> {
   const messages = await getDb()
     .select()
     .from(projectMessages)

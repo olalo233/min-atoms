@@ -71,6 +71,13 @@
       "when": 1785154487508,
       "tag": "0009_equal_flatman",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785168145991,
+      "tag": "0010_project-page-read-indexes",
+      "breakpoints": true
     }
   ]
 }

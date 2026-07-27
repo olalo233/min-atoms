@@ -1,0 +1,2 @@
+CREATE INDEX "build_requests_project_created_at_idx" ON "build_requests" USING btree ("project_id","created_at");--> statement-breakpoint
+CREATE INDEX "generation_jobs_project_created_at_idx" ON "generation_jobs" USING btree ("project_id","created_at");

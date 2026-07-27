@@ -88,6 +88,10 @@ export const buildRequests = pgTable(
   },
   (table) => [
     index("build_requests_project_id_idx").on(table.projectId),
+    index("build_requests_project_created_at_idx").on(
+      table.projectId,
+      table.createdAt,
+    ),
     index("build_requests_base_version_id_idx").on(table.baseVersionId),
   ],
 );
@@ -122,6 +126,10 @@ export const generationJobs = pgTable(
       sql`${table.status} in ('queued', 'planning', 'generating', 'validating', 'repairing', 'completed', 'failed', 'cancelled')`,
     ),
     index("generation_jobs_project_id_idx").on(table.projectId),
+    index("generation_jobs_project_created_at_idx").on(
+      table.projectId,
+      table.createdAt,
+    ),
     index("generation_jobs_build_request_id_idx").on(table.buildRequestId),
     index("generation_jobs_base_version_id_idx").on(table.baseVersionId),
     uniqueIndex("generation_jobs_one_active_project_idx")

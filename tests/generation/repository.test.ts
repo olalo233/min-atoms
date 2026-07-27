@@ -5,6 +5,7 @@ import {
   claimGenerationJob,
   createGenerationJob,
   failGenerationJob,
+  getProjectGenerationSnapshot,
   getOwnedGenerationSnapshot,
   persistGenerationAttempt,
   queueOwnedRuntimeRepair,
@@ -71,6 +72,79 @@ beforeEach(() => {
 });
 
 describe("generation status and event serialization", () => {
+  it("loads streamed generation details in one parallel query wave", async () => {
+    const files = {
+      "app.js": "",
+      "index.html": "<main>Ready</main>",
+      "manifest.json": JSON.stringify({
+        entry: "index.html",
+        ui: { preset: "min-atoms-base" },
+      }),
+      "styles.css": "",
+    };
+    const job = {
+      baseVersionId: null,
+      buildRequestId: "request-1",
+      completedAt: new Date("2026-07-27T00:01:00.000Z"),
+      createdAt: new Date("2026-07-27T00:00:00.000Z"),
+      errorMessage: null,
+      id: "job-1",
+      projectId: "project-1",
+      status: "completed" as const,
+      updatedAt: new Date("2026-07-27T00:01:00.000Z"),
+    };
+    const artifact = {
+      createdAt: new Date("2026-07-27T00:01:00.000Z"),
+      files,
+      id: "version-1",
+      jobId: "job-1",
+      projectId: "project-1",
+      version: 1,
+    };
+    const rows = [
+      Promise.resolve([
+        {
+          createdAt: new Date("2026-07-27T00:01:00.000Z"),
+          id: "event-1",
+          jobId: "job-1",
+          message: "Version 1 is ready in Preview.",
+          sequence: 1,
+          stage: "completed",
+        },
+      ]),
+      Promise.resolve([
+        {
+          createdAt: new Date("2026-07-27T00:01:00.000Z"),
+          id: "version-1",
+          version: 1,
+        },
+      ]),
+    ];
+    let selectCount = 0;
+    const database = {
+      select: vi.fn(() => {
+        const index = selectCount;
+        selectCount += 1;
+        const chain: Record<string, unknown> = {};
+        chain.from = vi.fn(() => chain);
+        chain.where = vi.fn(() => chain);
+        chain.orderBy = vi.fn(() => rows[index]);
+        return chain;
+      }),
+    };
+    mockedGetDb.mockReturnValue(database as never);
+
+    await expect(
+      getProjectGenerationSnapshot(job, artifact),
+    ).resolves.toMatchObject({
+      artifactVersion: { id: "version-1" },
+      events: [{ id: "event-1" }],
+      job: { id: "job-1" },
+      versions: [{ id: "version-1" }],
+    });
+    expect(database.select).toHaveBeenCalledTimes(2);
+  });
+
   it("loads project identity and snapshot parts in parallel without historical files", async () => {
     function deferred<T>() {
       let resolve!: (value: T) => void;

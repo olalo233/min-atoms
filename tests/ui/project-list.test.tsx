@@ -8,6 +8,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ProjectList } from "@/components/projects/project-list";
 
+const { prefetchMock } = vi.hoisted(() => ({
+  prefetchMock: vi.fn(),
+}));
+
 vi.mock("next/link", () => ({
   default: ({
     children,
@@ -23,6 +27,10 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ prefetch: prefetchMock }),
+}));
+
 const projects = [
   { id: "project-1", name: "Project: A daily water tracker", updatedLabel: "7/26/2026" },
   { id: "project-2", name: "Project: A compact counter", updatedLabel: "7/25/2026" },
@@ -30,6 +38,7 @@ const projects = [
 
 afterEach(() => {
   cleanup();
+  prefetchMock.mockClear();
   vi.unstubAllGlobals();
 });
 
@@ -62,6 +71,17 @@ describe("ProjectList", () => {
       screen.queryByRole("button", { name: "Confirm delete" }),
     ).not.toBeInTheDocument();
     expect(screen.getByText("Project: A daily water tracker")).toBeVisible();
+  });
+
+  it("prefetches a project when the user shows intent to open it", () => {
+    render(<ProjectList projects={projects} />);
+
+    const firstProject = screen.getAllByRole("link")[0];
+    fireEvent.pointerEnter(firstProject);
+    fireEvent.focus(firstProject);
+
+    expect(prefetchMock).toHaveBeenCalledOnce();
+    expect(prefetchMock).toHaveBeenCalledWith("/projects/project-1");
   });
 
   it("removes the project after a confirmed delete", async () => {

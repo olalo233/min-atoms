@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
 
 export type ProjectSummary = {
   id: string;
@@ -14,10 +15,19 @@ type ProjectListProps = {
 };
 
 export function ProjectList({ projects }: ProjectListProps) {
+  const router = useRouter();
+  const prefetchedRoutes = useRef(new Set<string>());
   const [items, setItems] = useState(projects);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  function prefetchProject(projectId: string) {
+    const route = `/projects/${projectId}`;
+    if (prefetchedRoutes.current.has(route)) return;
+    prefetchedRoutes.current.add(route);
+    router.prefetch(route);
+  }
 
   async function deleteProject(projectId: string) {
     setErrors((current) => {
@@ -75,6 +85,9 @@ export function ProjectList({ projects }: ProjectListProps) {
               <Link
                 className="project-card-link"
                 href={`/projects/${project.id}`}
+                onFocus={() => prefetchProject(project.id)}
+                onPointerEnter={() => prefetchProject(project.id)}
+                prefetch
               >
                 <span className="project-card-name">{project.name}</span>
                 <span className="project-card-meta">

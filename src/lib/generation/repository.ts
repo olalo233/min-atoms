@@ -160,6 +160,37 @@ export async function getGenerationSnapshotForJob(
   return getSnapshotForJob(job);
 }
 
+export async function getProjectGenerationSnapshot(
+  job: GenerationJob | null,
+  artifactVersion: ArtifactVersion | null,
+): Promise<GenerationSnapshot> {
+  if (!job) return emptySnapshot();
+
+  const [events, versions] = await Promise.all([
+    getDb()
+      .select()
+      .from(generationEvents)
+      .where(eq(generationEvents.jobId, job.id))
+      .orderBy(asc(generationEvents.sequence)),
+    getDb()
+      .select({
+        createdAt: artifactVersions.createdAt,
+        id: artifactVersions.id,
+        version: artifactVersions.version,
+      })
+      .from(artifactVersions)
+      .where(eq(artifactVersions.projectId, job.projectId))
+      .orderBy(desc(artifactVersions.version)),
+  ]);
+
+  return serializeSnapshot(
+    job,
+    events,
+    artifactVersion ?? undefined,
+    versions,
+  );
+}
+
 async function getSnapshotForJob(job: GenerationJob): Promise<GenerationSnapshot> {
   const [events, [activeArtifact], versions] = await Promise.all([
     getDb()
