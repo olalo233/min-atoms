@@ -5,6 +5,7 @@ import {
   claimGenerationJob,
   createGenerationJob,
   failGenerationJob,
+  getOwnedGenerationSnapshot,
   persistGenerationAttempt,
   queueOwnedRuntimeRepair,
   requeueGenerationForRevalidation,
@@ -70,6 +71,125 @@ beforeEach(() => {
 });
 
 describe("generation status and event serialization", () => {
+  it("loads project identity and snapshot parts in parallel without historical files", async () => {
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((complete) => {
+        resolve = complete;
+      });
+      return { promise, resolve };
+    }
+
+    const ownedProject = deferred<Array<{ id: string }>>();
+    const latestJob = deferred<
+      Array<{
+        baseVersionId: null;
+        buildRequestId: string;
+        completedAt: Date;
+        createdAt: Date;
+        errorMessage: null;
+        id: string;
+        projectId: string;
+        status: "completed";
+        updatedAt: Date;
+      }>
+    >();
+    const selections: Array<Record<string, unknown> | undefined> = [];
+    let selectCount = 0;
+    const files = {
+      "app.js": "",
+      "index.html": "<main>Ready</main>",
+      "manifest.json": JSON.stringify({
+        entry: "index.html",
+        ui: { preset: "min-atoms-base" },
+      }),
+      "styles.css": "",
+    };
+    const rows = [
+      ownedProject.promise,
+      latestJob.promise,
+      Promise.resolve([
+        {
+          createdAt: new Date("2026-07-27T00:00:00.000Z"),
+          id: "event-1",
+          jobId: "job-1",
+          message: "Version 1 is ready in Preview.",
+          sequence: 1,
+          stage: "completed",
+        },
+      ]),
+      Promise.resolve([
+        {
+          artifact: {
+            createdAt: new Date("2026-07-27T00:00:00.000Z"),
+            files,
+            id: "version-1",
+            jobId: "job-1",
+            projectId: "project-1",
+            version: 1,
+          },
+        },
+      ]),
+      Promise.resolve([
+        {
+          createdAt: new Date("2026-07-27T00:00:00.000Z"),
+          id: "version-1",
+          version: 1,
+        },
+      ]),
+    ];
+    const database = {
+      select: vi.fn((selection?: Record<string, unknown>) => {
+        const index = selectCount;
+        selectCount += 1;
+        selections.push(selection);
+        const chain: Record<string, unknown> = {};
+        chain.from = vi.fn(() => chain);
+        chain.innerJoin = vi.fn(() => chain);
+        chain.where = vi.fn(() => chain);
+        chain.limit = vi.fn(() => rows[index]);
+        chain.orderBy = vi.fn(() =>
+          index === 1 ? { limit: vi.fn(() => rows[index]) } : rows[index],
+        );
+        return chain;
+      }),
+    };
+    mockedGetDb.mockReturnValue(database as never);
+
+    const snapshotPromise = getOwnedGenerationSnapshot(
+      "owner-1",
+      "project-1",
+    );
+    expect(database.select).toHaveBeenCalledTimes(2);
+
+    ownedProject.resolve([{ id: "project-1" }]);
+    latestJob.resolve([
+      {
+        baseVersionId: null,
+        buildRequestId: "request-1",
+        completedAt: new Date("2026-07-27T00:00:00.000Z"),
+        createdAt: new Date("2026-07-27T00:00:00.000Z"),
+        errorMessage: null,
+        id: "job-1",
+        projectId: "project-1",
+        status: "completed",
+        updatedAt: new Date("2026-07-27T00:00:00.000Z"),
+      },
+    ]);
+
+    await expect(snapshotPromise).resolves.toMatchObject({
+      artifactVersion: { id: "version-1" },
+      versions: [{ id: "version-1", version: 1 }],
+    });
+    expect(database.select).toHaveBeenCalledTimes(5);
+    expect(selections[4]).toEqual({
+      createdAt: expect.anything(),
+      id: expect.anything(),
+      version: expect.anything(),
+    });
+    expect(selections[4]).not.toHaveProperty("files");
+  });
+
   it("creates the queued job and first event inside one project-locked transaction", async () => {
     const operations: string[] = [];
     let insertCount = 0;

@@ -17,12 +17,11 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
   }
 
   const { projectId } = await params;
-  const result = await getOwnedProject(user.id, projectId);
-  if (!result) {
-    notFound();
-  }
-  const generation = await getOwnedGenerationSnapshot(user.id, projectId);
-  if (!generation) {
+  const [result, generation] = await Promise.all([
+    getOwnedProject(user.id, projectId),
+    getOwnedGenerationSnapshot(user.id, projectId),
+  ]);
+  if (!result || !generation) {
     notFound();
   }
 

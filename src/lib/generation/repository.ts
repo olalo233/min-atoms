@@ -109,17 +109,25 @@ export async function getOwnedGenerationSnapshot(
   ownerId: string,
   projectId: string,
 ): Promise<GenerationSnapshot | null> {
-  const [project] = await getDb()
-    .select({ id: projects.id })
-    .from(projects)
-    .where(and(eq(projects.id, projectId), eq(projects.ownerId, ownerId)))
-    .limit(1);
+  const [[project], [job]] = await Promise.all([
+    getDb()
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.ownerId, ownerId)))
+      .limit(1),
+    getDb()
+      .select()
+      .from(generationJobs)
+      .where(eq(generationJobs.projectId, projectId))
+      .orderBy(desc(generationJobs.createdAt))
+      .limit(1),
+  ]);
 
   if (!project) {
     return null;
   }
-
-  return getGenerationSnapshot(projectId);
+  if (!job) return emptySnapshot();
+  return getSnapshotForJob(job);
 }
 
 export async function getGenerationSnapshot(
@@ -152,31 +160,33 @@ export async function getGenerationSnapshotForJob(
 }
 
 async function getSnapshotForJob(job: GenerationJob): Promise<GenerationSnapshot> {
+  const [events, [activeArtifact], versions] = await Promise.all([
+    getDb()
+      .select()
+      .from(generationEvents)
+      .where(eq(generationEvents.jobId, job.id))
+      .orderBy(asc(generationEvents.sequence)),
+    getDb()
+      .select({ artifact: artifactVersions })
+      .from(artifactVersions)
+      .innerJoin(
+        projects,
+        eq(projects.activeArtifactVersionId, artifactVersions.id),
+      )
+      .where(eq(projects.id, job.projectId))
+      .limit(1),
+    getDb()
+      .select({
+        createdAt: artifactVersions.createdAt,
+        id: artifactVersions.id,
+        version: artifactVersions.version,
+      })
+      .from(artifactVersions)
+      .where(eq(artifactVersions.projectId, job.projectId))
+      .orderBy(desc(artifactVersions.version)),
+  ]);
 
-  const events = await getDb()
-    .select()
-    .from(generationEvents)
-    .where(eq(generationEvents.jobId, job.id))
-    .orderBy(asc(generationEvents.sequence));
-  const [project] = await getDb()
-    .select({ activeArtifactVersionId: projects.activeArtifactVersionId })
-    .from(projects)
-    .where(eq(projects.id, job.projectId))
-    .limit(1);
-  const [artifactVersion] = project?.activeArtifactVersionId
-    ? await getDb()
-        .select()
-        .from(artifactVersions)
-        .where(eq(artifactVersions.id, project.activeArtifactVersionId))
-        .limit(1)
-    : [];
-  const versions = await getDb()
-    .select()
-    .from(artifactVersions)
-    .where(eq(artifactVersions.projectId, job.projectId))
-    .orderBy(desc(artifactVersions.version));
-
-  return serializeSnapshot(job, events, artifactVersion, versions);
+  return serializeSnapshot(job, events, activeArtifact?.artifact, versions);
 }
 
 function emptySnapshot(): GenerationSnapshot {
@@ -847,7 +857,7 @@ function serializeSnapshot(
   job: GenerationJob,
   events: GenerationEvent[],
   artifactVersion: ArtifactVersion | undefined,
-  versions: ArtifactVersion[],
+  versions: Array<Pick<ArtifactVersion, "createdAt" | "id" | "version">>,
 ): GenerationSnapshot {
   return {
     artifactVersion: artifactVersion
