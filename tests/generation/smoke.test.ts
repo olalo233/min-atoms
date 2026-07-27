@@ -18,6 +18,52 @@ describe("artifact smoke validation", () => {
     await expect(validateArtifactSmoke(await validFiles())).resolves.toBeUndefined();
   });
 
+  it("executes a bounded click sequence for a natural calculator interaction", async () => {
+    const files = {
+      ...(await validFiles()),
+      "index.html": `
+        <button id="digit-7">7</button>
+        <button id="operator-add">+</button>
+        <button id="digit-1">1</button>
+        <button id="equals">=</button>
+        <output id="count">0</output>
+      `,
+      "app.js": `
+        let expression = "";
+        document.querySelector("#digit-7").addEventListener("click", () => {
+          expression += "7";
+        });
+        document.querySelector("#operator-add").addEventListener("click", () => {
+          expression += "+";
+        });
+        document.querySelector("#digit-1").addEventListener("click", () => {
+          expression += "1";
+        });
+        document.querySelector("#equals").addEventListener("click", () => {
+          document.querySelector("#count").textContent =
+            expression === "7+1" ? "8" : "Error";
+        });
+      `,
+      "manifest.json": JSON.stringify({
+        entry: "index.html",
+        ui: { preset: "min-atoms-base" },
+        smoke: {
+          actions: [
+            { action: "click", selector: "#digit-7" },
+            { action: "click", selector: "#operator-add" },
+            { action: "click", selector: "#digit-1" },
+            { action: "click", selector: "#equals" },
+          ],
+          expect: { selector: "#count", text: "8" },
+        },
+      }),
+    };
+
+    await expect(
+      validateArtifactSmoke(validateArtifact(files)),
+    ).resolves.toBeUndefined();
+  });
+
   it("rejects a parseable artifact whose declared click does not work", async () => {
     const files = {
       ...(await validFiles()),
@@ -41,7 +87,9 @@ describe("artifact smoke validation", () => {
         ...files,
         "manifest.json": JSON.stringify(manifest),
       }),
-    ).rejects.toThrow("Artifact smoke action selector was not found.");
+    ).rejects.toThrow(
+      "Artifact smoke action selector #missing was not found in index.html.",
+    );
   });
 
   it("interrupts generated code that exceeds the execution deadline", async () => {
@@ -86,6 +134,29 @@ describe("artifact smoke validation", () => {
               document.querySelector("#count").textContent =
                 button.getAttribute("data-value");
             });
+          });
+        });
+      `,
+    };
+
+    await expect(validateArtifactSmoke(files)).resolves.toBeUndefined();
+  });
+
+  it("supports bounded Element querySelectorAll calls used to bind keypad controls", async () => {
+    const files = {
+      ...(await validFiles()),
+      "index.html": `
+        <section id="keypad">
+          <button class="calculator-key" data-value="1" id="increment">Increment</button>
+        </section>
+        <output id="count">0</output>
+      `,
+      "app.js": `
+        const keypad = document.querySelector("#keypad");
+        keypad.querySelectorAll(".calculator-key").forEach((button) => {
+          button.addEventListener("click", () => {
+            document.querySelector("#count").textContent =
+              button.getAttribute("data-value");
           });
         });
       `,
@@ -145,6 +216,36 @@ describe("artifact smoke validation", () => {
 
     await expect(validateArtifactSmoke(files)).rejects.toThrow(
       /Artifact smoke script failed:.*marked.*not defined/i,
+    );
+  });
+
+  it("names an unsupported DOM API in the repair diagnostic", async () => {
+    const files = {
+      ...(await validFiles()),
+      "app.js": `
+        document.querySelector("#increment").addEventListener("click", () => {
+          document.createElement("span");
+        });
+      `,
+    };
+
+    await expect(validateArtifactSmoke(files)).rejects.toThrow(
+      "Artifact smoke script failed: Unsupported smoke DOM API: document.createElement",
+    );
+  });
+
+  it("names an unsupported Element API in the repair diagnostic", async () => {
+    const files = {
+      ...(await validFiles()),
+      "app.js": `
+        document.querySelector("#increment").addEventListener("click", () => {
+          document.querySelector("#count").replaceChildren("1");
+        });
+      `,
+    };
+
+    await expect(validateArtifactSmoke(files)).rejects.toThrow(
+      "Artifact smoke script failed: Unsupported smoke DOM API: Element.replaceChildren",
     );
   });
 

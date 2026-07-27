@@ -527,7 +527,7 @@ export async function persistGenerationAttempt(
           ? `Artifact rejected after ${sequence} persisted attempts: ${diagnostic}`
           : `Provider failed after ${sequence} persisted attempts.`
         : attempt.outcome === "rejected"
-          ? `Attempt ${sequence} persisted. Waiting for the next incremental repair.`
+          ? `Attempt ${sequence} rejected: ${diagnostic} Waiting for the next incremental repair.`
           : `Attempt ${sequence} persisted after a provider failure. Waiting to continue.`,
       sequence: (lastEvent?.sequence ?? 0) + 1,
       stage: status,

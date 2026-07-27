@@ -57,7 +57,9 @@ export function validateArtifact(input: unknown): ArtifactFiles {
     const smokeContract = manifest.smoke;
     const idSelector = /^#[A-Za-z][\w:-]{0,63}$/;
     if (
-      !idSelector.test(smokeContract.selector) ||
+      smokeContract.actions.some(
+        (action) => !idSelector.test(action.selector),
+      ) ||
       !idSelector.test(smokeContract.expect.selector) ||
       smokeContract.expect.text.length === 0 ||
       smokeContract.expect.text.length > 256

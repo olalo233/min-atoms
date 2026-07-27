@@ -26,6 +26,8 @@ import {
 } from "@/lib/generation/validator";
 
 const runningJobs = new Set<string>();
+const UNCHANGED_REPAIR_FINDING =
+  "The previous Incremental Repair did not change any Candidate Artifact file. Replace at least one file with changed complete content that directly fixes the finding.";
 
 function supportsConstrainedFallback(buildRequest: string): boolean {
   return /programmer calculator|程序员计算器/i.test(buildRequest);
@@ -156,11 +158,30 @@ export async function runGenerationJob(
           );
           const repaired = applyArtifactRepair(step.candidate, response);
           if (artifactsEqual(step.candidate, repaired.files)) {
-            await failGenerationJob(
+            const diagnostic = [
+              step.diagnostic ?? "The Candidate Artifact still fails validation.",
+              UNCHANGED_REPAIR_FINDING,
+            ].join(" ");
+            if (
+              step.attemptCount + 1 >= MAX_GENERATION_ATTEMPTS &&
+              (await completeFallback(
+                jobId,
+                claim.projectId,
+                step.input,
+                "generating",
+              ))
+            ) {
+              return;
+            }
+            await persistGenerationAttempt({
+              candidateFiles: step.candidate,
+              diagnostic,
+              expectedStatus: "generating",
               jobId,
-              "artifact_stalled",
-              step.diagnostic ?? undefined,
-            );
+              kind: "repair",
+              outcome: "rejected",
+              repairPatch: repaired.patch,
+            });
             return;
           }
           candidate = repaired.files;

@@ -272,7 +272,7 @@ describe("generation status and event serialization", () => {
     });
     expect(inserted[1]).toMatchObject({
       message:
-        "Attempt 3 persisted. Waiting for the next incremental repair.",
+        "Attempt 3 rejected: Artifact manifest must satisfy the required contract. Waiting for the next incremental repair.",
       stage: "repairing",
     });
   });

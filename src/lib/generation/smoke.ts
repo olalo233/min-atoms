@@ -5,6 +5,7 @@ import {
 } from "quickjs-emscripten";
 
 import type { ArtifactFiles } from "@/lib/generation/types";
+import { readArtifactManifest } from "@/lib/generation/manifest";
 import { ArtifactValidationError } from "@/lib/generation/validator";
 
 const SMOKE_TIMEOUT_MS = 500;
@@ -76,24 +77,27 @@ function runPendingJobs(runtime: QuickJSRuntime) {
 }
 
 export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void> {
-  const manifest = JSON.parse(files["manifest.json"]) as {
-    smoke: {
-      expect: { selector: string; text: string };
-      selector: string;
-    };
-  };
-  const actionId = manifest.smoke.selector.slice(1);
-  const expectedId = manifest.smoke.expect.selector.slice(1);
-  const actionText = getElementText(files["index.html"], actionId);
-  const expectedText = getElementText(files["index.html"], expectedId);
-  if (actionText === null) {
+  const manifest = readArtifactManifest(files["manifest.json"]);
+  if (!manifest) {
     throw new ArtifactValidationError(
-      "Artifact smoke action selector was not found.",
+      "Artifact manifest must satisfy the required contract.",
     );
+  }
+  const actionIds = manifest.smoke.actions.map(
+    (action) => action.selector.slice(1),
+  );
+  const expectedId = manifest.smoke.expect.selector.slice(1);
+  const expectedText = getElementText(files["index.html"], expectedId);
+  for (const [index, actionId] of actionIds.entries()) {
+    if (getElementText(files["index.html"], actionId) === null) {
+      throw new ArtifactValidationError(
+        `Artifact smoke action selector ${manifest.smoke.actions[index].selector} was not found in index.html.`,
+      );
+    }
   }
   if (expectedText === null) {
     throw new ArtifactValidationError(
-      "Artifact smoke result selector was not found.",
+      `Artifact smoke result selector ${manifest.smoke.expect.selector} was not found in index.html.`,
     );
   }
 
@@ -119,8 +123,10 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
               dataset[name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
             }
           }
-          const node = {
+          let node;
+          node = new Proxy({
             id: seed.id || "",
+            onclick: null,
             tagName: seed.tagName.toUpperCase(),
             textContent: seed.textContent,
             value: attributes.value || "",
@@ -141,6 +147,12 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
             },
             getAttribute(name) { return attributes[name.toLowerCase()] ?? null; },
             setAttribute(name, value) { attributes[name.toLowerCase()] = String(value); },
+            querySelector(selector) {
+              return this.querySelectorAll(selector)[0] || null;
+            },
+            querySelectorAll(selector) {
+              return __allNodes.filter((candidate) => __matches(candidate, selector));
+            },
             addEventListener(type, listener) {
               (listeners[type] ||= []).push(listener);
             },
@@ -157,7 +169,12 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
               if (typeof node.onclick === "function") node.onclick.call(node, event);
               for (const listener of listeners.click || []) listener.call(node, event);
             },
-          };
+          }, {
+            get(target, property) {
+              if (property in target) return target[property];
+              throw new Error("Unsupported smoke DOM API: Element." + String(property));
+            },
+          });
           return node;
         });
       const __nodes = Object.fromEntries(
@@ -175,7 +192,7 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
         }
         return node.tagName.toLowerCase() === selector.toLowerCase();
       }
-      const document = {
+      const document = new Proxy({
         getElementById(id) { return __nodes[id] || null; },
         querySelector(selector) {
           return this.querySelectorAll(selector)[0] || null;
@@ -186,9 +203,16 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
         addEventListener(type, listener) {
           if (type === "DOMContentLoaded") listener({ currentTarget: document, target: document });
         },
-      };
+      }, {
+        get(target, property) {
+          if (property in target) return target[property];
+          throw new Error("Unsupported smoke DOM API: document." + String(property));
+        },
+      });
       const window = globalThis;
       window.document = document;
+      window.addEventListener = () => {};
+      window.removeEventListener = () => {};
       window.minAtomsData = {
         delete: async () => true,
         get: async () => null,
@@ -215,12 +239,14 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
     }
     context.unwrapResult(evaluation).dispose();
     runPendingJobs(runtime);
-    context
-      .unwrapResult(
-        context.evalCode(`__nodes[${JSON.stringify(actionId)}].click()`),
-      )
-      .dispose();
-    runPendingJobs(runtime);
+    for (const actionId of actionIds) {
+      context
+        .unwrapResult(
+          context.evalCode(`__nodes[${JSON.stringify(actionId)}].click()`),
+        )
+        .dispose();
+      runPendingJobs(runtime);
+    }
 
     const result = context.unwrapResult(
       context.evalCode(
@@ -230,15 +256,23 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
     const actualText = context.getString(result);
     result.dispose();
     if (actualText !== manifest.smoke.expect.text) {
+      const actionDescription = manifest.smoke.actions.length === 1
+        ? `click ${manifest.smoke.actions[0].selector}`
+        : `click sequence ${manifest.smoke.actions
+            .map((action) => action.selector)
+            .join(" -> ")}`;
       throw new SmokeExecutionFinding(
-        `Artifact smoke click ${manifest.smoke.selector} did not update ${manifest.smoke.expect.selector}. Expected ${JSON.stringify(manifest.smoke.expect.text.slice(0, 80))}; received ${JSON.stringify(actualText.slice(0, 80))}.`,
+        `Artifact smoke ${actionDescription} did not update ${manifest.smoke.expect.selector}. Expected ${JSON.stringify(manifest.smoke.expect.text.slice(0, 80))}; received ${JSON.stringify(actualText.slice(0, 80))}.`,
       );
     }
   } catch (error) {
+    const detail = error instanceof Error && error.message.trim()
+      ? `Artifact smoke script failed: ${error.message.slice(0, 120)}`
+      : "Artifact smoke script could not execute safely.";
     throw new ArtifactValidationError(
       error instanceof SmokeExecutionFinding
         ? error.message
-        : "Artifact smoke script could not execute safely.",
+        : detail,
     );
   } finally {
     context.dispose();

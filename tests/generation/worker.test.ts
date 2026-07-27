@@ -212,7 +212,7 @@ describe("durable generation worker", () => {
     expect(repository.completeGenerationJob).not.toHaveBeenCalled();
   });
 
-  it("stops an unchanged incremental repair instead of spending more attempts", async () => {
+  it("persists an unchanged repair so the next invocation can fix forward", async () => {
     const invalid = { ...files, "manifest.json": "{}" };
     repository.claimGenerationStep.mockResolvedValue({
       mode: "repair",
@@ -240,13 +240,71 @@ describe("durable generation worker", () => {
 
     await runGenerationJob("job-stalled", provider);
 
-    expect(repository.failGenerationJob).toHaveBeenCalledWith(
-      "job-stalled",
-      "artifact_stalled",
-      "Artifact manifest must satisfy the required contract.",
+    expect(repository.persistGenerationAttempt).toHaveBeenCalledWith({
+      candidateFiles: invalid,
+      diagnostic:
+        "Artifact manifest must satisfy the required contract. The previous Incremental Repair did not change any Candidate Artifact file. Replace at least one file with changed complete content that directly fixes the finding.",
+      expectedStatus: "generating",
+      jobId: "job-stalled",
+      kind: "repair",
+      outcome: "rejected",
+      repairPatch: {
+        operations: [
+          {
+            content: "{}",
+            op: "replace-file",
+            path: "manifest.json",
+          },
+        ],
+      },
+    });
+    expect(repository.failGenerationJob).not.toHaveBeenCalled();
+    expect(repository.completeGenerationJob).not.toHaveBeenCalled();
+  });
+
+  it("completes the calculator fallback when the final repair is unchanged", async () => {
+    const invalid = { ...files, "manifest.json": "{}" };
+    repository.claimGenerationStep.mockResolvedValue({
+      mode: "repair",
+      projectId: "project-calculator-fallback",
+      requiresGenerateTransition: false,
+    });
+    repository.getGenerationStepInput.mockResolvedValue({
+      attemptCount: 9,
+      candidate: invalid,
+      diagnostic: "The calculator smoke sequence still fails.",
+      input: {
+        baseArtifact: null,
+        buildRequest: "生成一个功能丰富的程序员计算器",
+      },
+    });
+    const provider: GenerationProvider = {
+      generate: vi.fn(),
+      repair: vi.fn().mockResolvedValue({
+        operations: [
+          {
+            content: "{}",
+            op: "replace-file",
+            path: "manifest.json",
+          },
+        ],
+      }),
+    };
+
+    await runGenerationJob("job-calculator-fallback", provider);
+
+    expect(repository.completeGenerationJob).toHaveBeenCalledWith(
+      "job-calculator-fallback",
+      "project-calculator-fallback",
+      expect.objectContaining({
+        "app.js": expect.any(String),
+        "index.html": expect.any(String),
+        "manifest.json": expect.any(String),
+        "styles.css": expect.any(String),
+      }),
     );
     expect(repository.persistGenerationAttempt).not.toHaveBeenCalled();
-    expect(repository.completeGenerationJob).not.toHaveBeenCalled();
+    expect(repository.failGenerationJob).not.toHaveBeenCalled();
   });
 
   it("does not call the provider when another invocation owns the step", async () => {

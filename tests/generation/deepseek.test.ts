@@ -48,15 +48,15 @@ describe("DeepSeek artifact contract", () => {
     expect(instruction).toContain("Do not rely on undeclared globals");
     expect(instruction).toContain("Markdown");
     expect(instruction).toContain("without external libraries");
-    expect(instruction).toContain("does not infer a select value");
-    expect(instruction).toContain("operator.value || '+'");
-    expect(instruction).toContain("synchronously update the expected element");
+    expect(instruction).toContain("between one and eight declared click actions");
+    expect(instruction).toContain("synchronously advance the expected interaction");
     expect(instruction).toContain("pico-2");
     expect(instruction).toContain("bootstrap-5");
     expect(instruction).toContain("one signature element");
     expect(instruction).toContain("platform loads the preset stylesheet");
     expect(instruction).toContain("never add link or script tags");
-    expect(instruction).toContain("7 + 1");
+    expect(instruction).toContain("7, +, 1, =");
+    expect(instruction).toContain("expression must be exactly 7+1");
     expect(instruction).toContain('expect text "8"');
   });
 
@@ -95,9 +95,19 @@ describe("DeepSeek artifact contract", () => {
       (message) => message.role === "user",
     )?.content;
     expect(instruction).toContain("Do not return the candidate unchanged");
+    expect(instruction).toContain("repair every inconsistent part");
+    expect(instruction).toContain("Calculate, Evaluate, or Equals");
+    expect(instruction).toContain(
+      "a keypad sequence may use digit and operator controls",
+    );
+    expect(instruction).toContain(
+      "the exact variable evaluated by Equals must contain 7+1",
+    );
     expect(instruction).toContain("#calculate");
     expect(instruction).toContain("#result");
     expect(instruction).toContain('"op":"replace-file"');
+    expect(instruction).toContain("compare every replacement byte-for-byte");
+    expect(instruction).toContain("at least one file actually changes");
     expect(instruction).not.toContain(
       "Return only a JSON object with exactly these string keys",
     );
