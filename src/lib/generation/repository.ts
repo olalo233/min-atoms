@@ -1,8 +1,9 @@
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 
 import {
   artifactVersions,
   buildRequests,
+  generationAttempts,
   generationEvents,
   generationJobs,
   projects,
@@ -13,13 +14,41 @@ import {
 import { getDb } from "@/lib/db/client";
 import {
   type ArtifactFiles,
+  type ArtifactRepairPatch,
   ACTIVE_GENERATION_STATUSES,
   type ActiveGenerationStage,
   type BaseArtifact,
   type GenerationInput,
   type GenerationSnapshot,
+  GENERATION_STEP_LEASE_MS,
 } from "@/lib/generation/types";
 import { validateArtifact } from "@/lib/generation/validator";
+
+export const MAX_GENERATION_ATTEMPTS = 10;
+
+export type GenerationStepClaim = {
+  mode: "generate" | "repair";
+  projectId: string;
+  requiresGenerateTransition: boolean;
+};
+
+export type GenerationStepInput = {
+  attemptCount: number;
+  candidate: ArtifactFiles | null;
+  diagnostic: string | null;
+  input: GenerationInput;
+};
+
+export type GenerationAttemptInput = {
+  candidateFiles?: ArtifactFiles;
+  diagnostic?: string;
+  expectedStatus: "generating" | "validating";
+  jobId: string;
+  kind: "generate" | "repair";
+  outcome: "provider_failed" | "rejected";
+  providerError?: string;
+  repairPatch?: ArtifactRepairPatch;
+};
 
 export async function createGenerationJob(
   projectId: string,
@@ -236,6 +265,217 @@ export async function claimGenerationJob(jobId: string): Promise<boolean> {
   );
 }
 
+export async function claimGenerationStep(
+  jobId: string,
+): Promise<GenerationStepClaim | null> {
+  return getDb().transaction(async (transaction) => {
+    const [jobIdentity] = await transaction
+      .select({ projectId: generationJobs.projectId })
+      .from(generationJobs)
+      .where(eq(generationJobs.id, jobId))
+      .limit(1);
+    if (!jobIdentity) return null;
+
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${jobIdentity.projectId}))`,
+    );
+    const [job] = await transaction
+      .select({
+        projectId: generationJobs.projectId,
+        status: generationJobs.status,
+        updatedAt: generationJobs.updatedAt,
+      })
+      .from(generationJobs)
+      .where(eq(generationJobs.id, jobId))
+      .limit(1);
+    if (!job) {
+      return null;
+    }
+    const leaseExpired =
+      ACTIVE_GENERATION_STATUSES.includes(
+        job.status as (typeof ACTIVE_GENERATION_STATUSES)[number],
+      ) &&
+      Date.now() - job.updatedAt.getTime() >= GENERATION_STEP_LEASE_MS;
+    if (
+      job.status !== "queued" &&
+      job.status !== "repairing" &&
+      !leaseExpired
+    ) {
+      return null;
+    }
+
+    const [latestCandidate] = await transaction
+      .select({ candidateFiles: generationAttempts.candidateFiles })
+      .from(generationAttempts)
+      .where(
+        and(
+          eq(generationAttempts.jobId, jobId),
+          isNotNull(generationAttempts.candidateFiles),
+        ),
+      )
+      .orderBy(desc(generationAttempts.sequence))
+      .limit(1);
+    const mode = latestCandidate?.candidateFiles ? "repair" : "generate";
+    const status = job.status === "queued" ? "planning" : "generating";
+    const [updated] = await transaction
+      .update(generationJobs)
+      .set({ status, updatedAt: new Date() })
+      .where(
+        and(eq(generationJobs.id, jobId), eq(generationJobs.status, job.status)),
+      )
+      .returning({ id: generationJobs.id });
+    if (!updated) return null;
+
+    const [lastEvent] = await transaction
+      .select({ sequence: generationEvents.sequence })
+      .from(generationEvents)
+      .where(eq(generationEvents.jobId, jobId))
+      .orderBy(desc(generationEvents.sequence))
+      .limit(1);
+    await transaction.insert(generationEvents).values({
+      jobId,
+      message:
+        status === "planning"
+          ? "Planning the constrained artifact."
+          : leaseExpired
+            ? "Recovering an expired generation step from persisted state."
+          : mode === "repair"
+            ? "Continuing the next persisted incremental repair."
+            : "Retrying the initial provider request.",
+      sequence: (lastEvent?.sequence ?? 0) + 1,
+      stage: status,
+    });
+    return {
+      mode,
+      projectId: job.projectId,
+      requiresGenerateTransition: status === "planning",
+    };
+  });
+}
+
+export async function getGenerationStepInput(
+  jobId: string,
+): Promise<GenerationStepInput> {
+  const input = await getGenerationInputForJob(jobId);
+  const attempts = await getDb()
+    .select({
+      candidateFiles: generationAttempts.candidateFiles,
+      diagnostic: generationAttempts.diagnostic,
+    })
+    .from(generationAttempts)
+    .where(eq(generationAttempts.jobId, jobId))
+    .orderBy(desc(generationAttempts.sequence));
+
+  return {
+    attemptCount: attempts.length,
+    candidate:
+      attempts.find((attempt) => attempt.candidateFiles)?.candidateFiles ??
+      null,
+    diagnostic:
+      attempts.find((attempt) => attempt.diagnostic)?.diagnostic ?? null,
+    input,
+  };
+}
+
+export async function persistGenerationAttempt(
+  attempt: GenerationAttemptInput,
+): Promise<"repairing" | "failed" | null> {
+  return getDb().transaction(async (transaction) => {
+    const [jobIdentity] = await transaction
+      .select({ projectId: generationJobs.projectId })
+      .from(generationJobs)
+      .where(eq(generationJobs.id, attempt.jobId))
+      .limit(1);
+    if (!jobIdentity) return null;
+
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${jobIdentity.projectId}))`,
+    );
+    const [job] = await transaction
+      .select({ status: generationJobs.status })
+      .from(generationJobs)
+      .where(eq(generationJobs.id, attempt.jobId))
+      .limit(1);
+    if (!job || job.status !== attempt.expectedStatus) return null;
+
+    const [lastAttempt] = await transaction
+      .select({ sequence: generationAttempts.sequence })
+      .from(generationAttempts)
+      .where(eq(generationAttempts.jobId, attempt.jobId))
+      .orderBy(desc(generationAttempts.sequence))
+      .limit(1);
+    const sequence = (lastAttempt?.sequence ?? 0) + 1;
+    const providerError =
+      attempt.outcome === "provider_failed"
+        ? sanitizeProviderError(attempt.providerError)
+        : null;
+    const diagnostic =
+      attempt.outcome === "rejected"
+        ? sanitizeAttemptDetail(attempt.diagnostic)
+        : null;
+    if (
+      (attempt.outcome === "provider_failed" && !providerError) ||
+      (attempt.outcome === "rejected" &&
+        (!attempt.candidateFiles || !diagnostic))
+    ) {
+      throw new Error("Invalid Generation Attempt payload.");
+    }
+
+    await transaction.insert(generationAttempts).values({
+      candidateFiles: attempt.candidateFiles,
+      diagnostic,
+      jobId: attempt.jobId,
+      kind: attempt.kind,
+      outcome: attempt.outcome,
+      providerError,
+      repairPatch: attempt.repairPatch,
+      sequence,
+    });
+
+    const exhausted = sequence >= MAX_GENERATION_ATTEMPTS;
+    const status = exhausted ? "failed" : "repairing";
+    const [updated] = await transaction
+      .update(generationJobs)
+      .set({
+        errorMessage: exhausted
+          ? attempt.outcome === "rejected"
+            ? "artifact_invalid"
+            : providerError
+          : null,
+        status,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(generationJobs.id, attempt.jobId),
+          eq(generationJobs.status, attempt.expectedStatus),
+        ),
+      )
+      .returning({ id: generationJobs.id });
+    if (!updated) return null;
+
+    const [lastEvent] = await transaction
+      .select({ sequence: generationEvents.sequence })
+      .from(generationEvents)
+      .where(eq(generationEvents.jobId, attempt.jobId))
+      .orderBy(desc(generationEvents.sequence))
+      .limit(1);
+    await transaction.insert(generationEvents).values({
+      jobId: attempt.jobId,
+      message: exhausted
+        ? attempt.outcome === "rejected"
+          ? `Artifact rejected after ${sequence} persisted attempts: ${diagnostic}`
+          : `Provider failed after ${sequence} persisted attempts.`
+        : attempt.outcome === "rejected"
+          ? `Attempt ${sequence} persisted. Waiting for the next incremental repair.`
+          : `Attempt ${sequence} persisted after a provider failure. Waiting to continue.`,
+      sequence: (lastEvent?.sequence ?? 0) + 1,
+      stage: status,
+    });
+    return status;
+  });
+}
+
 export async function completeGenerationJob(
   jobId: string,
   projectId: string,
@@ -335,11 +575,7 @@ export async function failGenerationJob(
       .where(eq(generationEvents.jobId, jobId))
       .orderBy(desc(generationEvents.sequence))
       .limit(1);
-    const safeDetail = detail
-      ?.replace(/[\r\n\t]+/g, " ")
-      .replace(/"[^"]*"/g, '"[redacted]"')
-      .slice(0, 640)
-      .trim();
+    const safeDetail = sanitizeAttemptDetail(detail);
     await transaction.insert(generationEvents).values({
       jobId,
       message:
@@ -350,6 +586,23 @@ export async function failGenerationJob(
       stage: "failed",
     });
   });
+}
+
+function sanitizeAttemptDetail(detail: string | undefined): string | null {
+  return (
+    detail
+      ?.replace(/[\r\n\t]+/g, " ")
+      .replace(/"[^"]*"/g, '"[redacted]"')
+      .slice(0, 640)
+      .trim() || null
+  );
+}
+
+function sanitizeProviderError(error: string | undefined): string | null {
+  if (!error || !/^provider_[a-z0-9_]+$/i.test(error)) {
+    return null;
+  }
+  return error.slice(0, 128);
 }
 
 export async function cancelOwnedGeneration(

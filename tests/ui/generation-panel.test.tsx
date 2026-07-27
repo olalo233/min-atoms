@@ -276,6 +276,54 @@ describe("GenerationPanel", () => {
     expect(screen.getByText("Artifact Version 2")).toBeVisible();
   });
 
+  it("continues one persisted repair step without duplicating the same attempt", async () => {
+    vi.useFakeTimers();
+    const repairing = generationSnapshot("repairing", {
+      events: [
+        {
+          createdAt: "2026-07-26T00:01:00.000Z",
+          id: "event-repair",
+          message: "Attempt 1 persisted.",
+          sequence: 5,
+          stage: "repairing",
+        },
+      ],
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: vi.fn().mockResolvedValue(repairing),
+      ok: true,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GenerationPanel
+        buildRequest="Build a compact counter."
+        initialGeneration={generationSnapshot("generating")}
+        projectId="project-1"
+      />,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_200);
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project-1/generation",
+      { cache: "no-store" },
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project-1/generation",
+      { method: "POST" },
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_200);
+    });
+    expect(
+      fetchMock.mock.calls.filter(([, init]) => init?.method === "POST"),
+    ).toHaveLength(1);
+  });
+
   it("pauses progress polling while the tab is hidden and resumes on return", async () => {
     vi.useFakeTimers();
     const completedSnapshot = generationSnapshot("completed", { artifact: true });

@@ -3,18 +3,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GenerationProvider } from "@/lib/generation/provider";
 
 const repository = vi.hoisted(() => ({
-  claimGenerationJob: vi.fn(),
+  claimGenerationStep: vi.fn(),
   completeGenerationJob: vi.fn(),
   failGenerationJob: vi.fn(),
-  getGenerationInputForJob: vi.fn(),
-  getGenerationSnapshotForJob: vi.fn(),
+  getGenerationStepInput: vi.fn(),
+  persistGenerationAttempt: vi.fn(),
   updateGenerationStatus: vi.fn(),
 }));
 const smoke = vi.hoisted(() => ({
   validateArtifactSmoke: vi.fn(),
 }));
 
-vi.mock("@/lib/generation/repository", () => repository);
+vi.mock("@/lib/generation/repository", () => ({
+  ...repository,
+  MAX_GENERATION_ATTEMPTS: 10,
+}));
 vi.mock("@/lib/generation/smoke", () => smoke);
 
 import { runGenerationJob } from "@/lib/generation/worker";
@@ -34,303 +37,187 @@ const files = {
   "styles.css": "",
 };
 
-describe("generation worker", () => {
+describe("durable generation worker", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     repository.updateGenerationStatus.mockResolvedValue(true);
+    repository.persistGenerationAttempt.mockResolvedValue("repairing");
     smoke.validateArtifactSmoke.mockResolvedValue(undefined);
   });
 
-  it("claims one queued job and uses its persisted Build Request", async () => {
-    repository.claimGenerationJob.mockResolvedValue(true);
-    repository.getGenerationSnapshotForJob.mockResolvedValue({
-      artifactVersion: null,
-      events: [],
-      job: {
-        buildRequestId: "request-1",
-        completedAt: null,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        errorMessage: null,
-        id: "job-1",
-        projectId: "project-1",
-        status: "planning",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      },
+  it("performs one generation request and completes a valid candidate", async () => {
+    repository.claimGenerationStep.mockResolvedValue({
+      mode: "generate",
+      projectId: "project-1",
+      requiresGenerateTransition: true,
     });
-    repository.getGenerationInputForJob.mockResolvedValue({
-      baseArtifact: null,
-      buildRequest: "Build a counter",
+    repository.getGenerationStepInput.mockResolvedValue({
+      attemptCount: 0,
+      candidate: null,
+      diagnostic: null,
+      input: { baseArtifact: null, buildRequest: "Build a counter" },
     });
     const provider: GenerationProvider = {
       generate: vi.fn().mockResolvedValue(files),
+      repair: vi.fn(),
     };
 
     await runGenerationJob("job-1", provider);
 
-    expect(repository.claimGenerationJob).toHaveBeenCalledWith("job-1");
-    expect(repository.getGenerationInputForJob).toHaveBeenCalledWith("job-1");
-    expect(provider.generate).toHaveBeenCalledWith({
-      baseArtifact: null,
-      buildRequest: "Build a counter",
-    });
-    expect(repository.updateGenerationStatus.mock.calls).toEqual([
-      [
-        "job-1",
-        "planning",
-        "generating",
-        "Generating the constrained four-file artifact.",
-      ],
-      [
-        "job-1",
-        "generating",
-        "validating",
-        "Validating the exact artifact contract.",
-      ],
-    ]);
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+    expect(provider.repair).not.toHaveBeenCalled();
     expect(repository.completeGenerationJob).toHaveBeenCalledWith(
       "job-1",
       "project-1",
       files,
     );
-    expect(repository.failGenerationJob).not.toHaveBeenCalled();
+    expect(repository.persistGenerationAttempt).not.toHaveBeenCalled();
   });
 
-  it("does not run a provider when another worker already claimed the job", async () => {
-    repository.claimGenerationJob.mockResolvedValue(false);
+  it("persists an invalid candidate and stops without repairing in the same invocation", async () => {
+    const invalid = { ...files, "manifest.json": "{}" };
+    repository.claimGenerationStep.mockResolvedValue({
+      mode: "generate",
+      projectId: "project-2",
+      requiresGenerateTransition: true,
+    });
+    repository.getGenerationStepInput.mockResolvedValue({
+      attemptCount: 0,
+      candidate: null,
+      diagnostic: null,
+      input: { baseArtifact: null, buildRequest: "Build a counter" },
+    });
     const provider: GenerationProvider = {
-      generate: vi.fn(),
+      generate: vi.fn().mockResolvedValue(invalid),
+      repair: vi.fn(),
     };
 
     await runGenerationJob("job-2", provider);
 
-    expect(provider.generate).not.toHaveBeenCalled();
-    expect(repository.getGenerationSnapshotForJob).not.toHaveBeenCalled();
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+    expect(provider.repair).not.toHaveBeenCalled();
+    expect(repository.persistGenerationAttempt).toHaveBeenCalledWith({
+      candidateFiles: invalid,
+      diagnostic: "Artifact manifest must satisfy the required contract.",
+      expectedStatus: "validating",
+      jobId: "job-2",
+      kind: "generate",
+      outcome: "rejected",
+      repairPatch: undefined,
+    });
+    expect(repository.completeGenerationJob).not.toHaveBeenCalled();
   });
 
-  it("stops without completing when a persisted cancellation wins", async () => {
-    repository.claimGenerationJob.mockResolvedValue(true);
-    repository.getGenerationSnapshotForJob.mockResolvedValue({
-      artifactVersion: null,
-      events: [],
-      job: {
-        buildRequestId: "request-cancelled",
-        completedAt: null,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        errorMessage: null,
-        id: "job-cancelled",
-        projectId: "project-cancelled",
-        status: "planning",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      },
+  it("resumes the persisted candidate and applies one incremental repair patch", async () => {
+    const invalid = { ...files, "manifest.json": "{}" };
+    repository.claimGenerationStep.mockResolvedValue({
+      mode: "repair",
+      projectId: "project-3",
+      requiresGenerateTransition: false,
     });
-    repository.getGenerationInputForJob.mockResolvedValue({
-      baseArtifact: null,
-      buildRequest: "Build a counter",
+    repository.getGenerationStepInput.mockResolvedValue({
+      attemptCount: 1,
+      candidate: invalid,
+      diagnostic: "Artifact manifest must satisfy the required contract.",
+      input: { baseArtifact: null, buildRequest: "Build a counter" },
+    });
+    const patch = {
+      operations: [
+        {
+          content: files["manifest.json"],
+          op: "replace-file" as const,
+          path: "manifest.json" as const,
+        },
+      ],
+    };
+    const provider: GenerationProvider = {
+      generate: vi.fn(),
+      repair: vi.fn().mockResolvedValue(patch),
+    };
+
+    await runGenerationJob("job-3", provider);
+
+    expect(provider.generate).not.toHaveBeenCalled();
+    expect(provider.repair).toHaveBeenCalledTimes(1);
+    expect(provider.repair).toHaveBeenCalledWith(
+      { baseArtifact: null, buildRequest: "Build a counter" },
+      invalid,
+      "Artifact manifest must satisfy the required contract.",
+    );
+    expect(repository.completeGenerationJob).toHaveBeenCalledWith(
+      "job-3",
+      "project-3",
+      files,
+    );
+  });
+
+  it("persists an invalid repair response as a provider failure with the prior candidate", async () => {
+    const invalid = { ...files, "manifest.json": "{}" };
+    repository.claimGenerationStep.mockResolvedValue({
+      mode: "repair",
+      projectId: "project-4",
+      requiresGenerateTransition: false,
+    });
+    repository.getGenerationStepInput.mockResolvedValue({
+      attemptCount: 2,
+      candidate: invalid,
+      diagnostic: "Fix the manifest.",
+      input: { baseArtifact: null, buildRequest: "Build a counter" },
+    });
+    const provider: GenerationProvider = {
+      generate: vi.fn(),
+      repair: vi.fn().mockResolvedValue({ operations: [] }),
+    };
+
+    await runGenerationJob("job-4", provider);
+
+    expect(provider.repair).toHaveBeenCalledTimes(1);
+    expect(repository.persistGenerationAttempt).toHaveBeenCalledWith({
+      candidateFiles: invalid,
+      expectedStatus: "generating",
+      jobId: "job-4",
+      kind: "repair",
+      outcome: "provider_failed",
+      providerError: "provider_invalid_response",
+    });
+    expect(repository.completeGenerationJob).not.toHaveBeenCalled();
+  });
+
+  it("does not call the provider when another invocation owns the step", async () => {
+    repository.claimGenerationStep.mockResolvedValue(null);
+    const provider: GenerationProvider = {
+      generate: vi.fn(),
+      repair: vi.fn(),
+    };
+
+    await runGenerationJob("job-5", provider);
+
+    expect(provider.generate).not.toHaveBeenCalled();
+    expect(provider.repair).not.toHaveBeenCalled();
+    expect(repository.getGenerationStepInput).not.toHaveBeenCalled();
+  });
+
+  it("stops when cancellation wins the persisted transition", async () => {
+    repository.claimGenerationStep.mockResolvedValue({
+      mode: "generate",
+      projectId: "project-6",
+      requiresGenerateTransition: true,
+    });
+    repository.getGenerationStepInput.mockResolvedValue({
+      attemptCount: 0,
+      candidate: null,
+      diagnostic: null,
+      input: { baseArtifact: null, buildRequest: "Build a counter" },
     });
     repository.updateGenerationStatus.mockResolvedValueOnce(false);
     const provider: GenerationProvider = {
       generate: vi.fn(),
     };
 
-    await runGenerationJob("job-cancelled", provider);
+    await runGenerationJob("job-6", provider);
 
     expect(provider.generate).not.toHaveBeenCalled();
     expect(repository.completeGenerationJob).not.toHaveBeenCalled();
     expect(repository.failGenerationJob).not.toHaveBeenCalled();
-  });
-
-  it("repairs one rejected artifact and completes the same job", async () => {
-    repository.claimGenerationJob.mockResolvedValue(true);
-    repository.getGenerationSnapshotForJob.mockResolvedValue({
-      artifactVersion: null,
-      events: [],
-      job: {
-        buildRequestId: "request-3",
-        completedAt: null,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        errorMessage: null,
-        id: "job-3",
-        projectId: "project-3",
-        status: "planning",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      },
-    });
-    repository.getGenerationInputForJob.mockResolvedValue({
-      baseArtifact: null,
-      buildRequest: "Build a counter",
-    });
-    const repairable = { ...files, "manifest.json": "{}" };
-    const provider: GenerationProvider = {
-      generate: vi.fn().mockResolvedValue(repairable),
-      repair: vi.fn().mockResolvedValue(files),
-    };
-
-    await runGenerationJob("job-3", provider);
-
-    expect(provider.repair).toHaveBeenCalledWith(
-      { baseArtifact: null, buildRequest: "Build a counter" },
-      repairable,
-      "Artifact manifest must satisfy the required contract.",
-    );
-    expect(repository.updateGenerationStatus.mock.calls).toEqual([
-      ["job-3", "planning", "generating", "Generating the constrained four-file artifact."],
-      ["job-3", "generating", "validating", "Validating the exact artifact contract."],
-      ["job-3", "validating", "repairing", "Repairing validation finding 1 of 2."],
-      ["job-3", "repairing", "validating", "Validating the repaired artifact."],
-    ]);
-    expect(repository.completeGenerationJob).toHaveBeenCalledWith(
-      "job-3",
-      "project-3",
-      files,
-    );
-    expect(repository.failGenerationJob).not.toHaveBeenCalled();
-  });
-
-  it("uses the second validation finding for one final bounded repair", async () => {
-    repository.claimGenerationJob.mockResolvedValue(true);
-    repository.getGenerationSnapshotForJob.mockResolvedValue({
-      artifactVersion: null,
-      events: [],
-      job: {
-        buildRequestId: "request-3b",
-        completedAt: null,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        errorMessage: null,
-        id: "job-3b",
-        projectId: "project-3b",
-        status: "planning",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      },
-    });
-    repository.getGenerationInputForJob.mockResolvedValue({
-      baseArtifact: null,
-      buildRequest: "Render Markdown without external libraries",
-    });
-    const first = { ...files, "manifest.json": "{}" };
-    const second = { ...files, "app.js": "marked.parse('hello')" };
-    const provider: GenerationProvider = {
-      generate: vi.fn().mockResolvedValue(first),
-      repair: vi.fn()
-        .mockResolvedValueOnce(second)
-        .mockResolvedValueOnce(files),
-    };
-    smoke.validateArtifactSmoke
-      .mockRejectedValueOnce(new Error("undeclared runtime global"))
-      .mockResolvedValueOnce(undefined);
-
-    await runGenerationJob("job-3b", provider);
-
-    expect(provider.repair).toHaveBeenNthCalledWith(
-      1,
-      {
-        baseArtifact: null,
-        buildRequest: "Render Markdown without external libraries",
-      },
-      first,
-      "Artifact manifest must satisfy the required contract.",
-    );
-    expect(provider.repair).toHaveBeenNthCalledWith(
-      2,
-      {
-        baseArtifact: null,
-        buildRequest: "Render Markdown without external libraries",
-      },
-      second,
-      "Artifact did not satisfy the required contract.",
-    );
-    expect(repository.completeGenerationJob).toHaveBeenCalledWith(
-      "job-3b",
-      "project-3b",
-      files,
-    );
-    expect(repository.failGenerationJob).not.toHaveBeenCalled();
-  });
-
-  it("fails safely after two permanently invalid repairs without replacing an artifact", async () => {
-    repository.claimGenerationJob.mockResolvedValue(true);
-    repository.getGenerationSnapshotForJob.mockResolvedValue({
-      artifactVersion: null,
-      events: [],
-      job: {
-        buildRequestId: "request-4",
-        completedAt: null,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        errorMessage: null,
-        id: "job-4",
-        projectId: "project-4",
-        status: "planning",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      },
-    });
-    repository.getGenerationInputForJob.mockResolvedValue({
-      baseArtifact: null,
-      buildRequest: "Build a counter",
-    });
-    const invalid = { ...files, "manifest.json": "{}" };
-    const provider: GenerationProvider = {
-      generate: vi.fn().mockResolvedValue(invalid),
-      repair: vi.fn().mockResolvedValue(invalid),
-    };
-
-    await runGenerationJob("job-4", provider);
-
-    expect(provider.repair).toHaveBeenCalledWith(
-      { baseArtifact: null, buildRequest: "Build a counter" },
-      invalid,
-      "Artifact manifest must satisfy the required contract.",
-    );
-    expect(repository.completeGenerationJob).not.toHaveBeenCalled();
-    expect(repository.failGenerationJob).toHaveBeenCalledWith(
-      "job-4",
-      "artifact_invalid",
-      "Artifact manifest must satisfy the required contract.",
-    );
-    expect(provider.repair).toHaveBeenCalledTimes(2);
-    expect(repository.updateGenerationStatus).toHaveBeenCalledTimes(6);
-  });
-
-  it("uses the constrained calculator fallback after AI repairs are exhausted", async () => {
-    repository.claimGenerationJob.mockResolvedValue(true);
-    repository.getGenerationSnapshotForJob.mockResolvedValue({
-      artifactVersion: null,
-      events: [],
-      job: {
-        buildRequestId: "request-calculator",
-        completedAt: null,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        errorMessage: null,
-        id: "job-calculator",
-        projectId: "project-calculator",
-        status: "planning",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      },
-    });
-    repository.getGenerationInputForJob.mockResolvedValue({
-      baseArtifact: null,
-      buildRequest: "构建一个现代化的程序员计算器",
-    });
-    const invalid = { ...files, "manifest.json": "{}" };
-    const provider: GenerationProvider = {
-      generate: vi.fn().mockResolvedValue(invalid),
-      repair: vi.fn().mockResolvedValue(invalid),
-    };
-
-    await runGenerationJob("job-calculator", provider);
-
-    expect(repository.failGenerationJob).not.toHaveBeenCalled();
-    expect(repository.completeGenerationJob).toHaveBeenCalledWith(
-      "job-calculator",
-      "project-calculator",
-      expect.objectContaining({
-        "index.html": expect.stringContaining("Programmer calculator"),
-        "manifest.json": expect.stringContaining('"#calculate"'),
-      }),
-    );
-    expect(repository.updateGenerationStatus).toHaveBeenCalledWith(
-      "job-calculator",
-      "validating",
-      "repairing",
-      "AI repairs exhausted. Recovering with the constrained calculator template.",
-    );
   });
 });

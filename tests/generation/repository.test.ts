@@ -5,6 +5,7 @@ import {
   claimGenerationJob,
   createGenerationJob,
   failGenerationJob,
+  persistGenerationAttempt,
   updateGenerationStatus,
 } from "@/lib/generation/repository";
 
@@ -191,6 +192,87 @@ describe("generation status and event serialization", () => {
         message:
           "Artifact rejected: Artifact manifest must satisfy the required contract.",
         stage: "failed",
+    });
+  });
+
+  it("persists one rejected candidate before transitioning the job to repairing", async () => {
+    const inserted: unknown[] = [];
+    let selectCount = 0;
+    let persistedStatus = "";
+    const transaction = {
+      execute: vi.fn(async () => undefined),
+      insert: vi.fn(() => ({
+        values: vi.fn(async (value: unknown) => {
+          inserted.push(value);
+        }),
+      })),
+      select: vi.fn(() => {
+        selectCount += 1;
+        const rows =
+          selectCount === 1
+            ? [{ projectId: "project-1" }]
+            : selectCount === 2
+              ? [{ status: "validating" }]
+              : selectCount === 3
+                ? [{ sequence: 2 }]
+                : [{ sequence: 8 }];
+        return {
+          from: vi.fn(() => ({
+            where: vi.fn(() =>
+              selectCount >= 3
+                ? {
+                    orderBy: vi.fn(() => ({
+                      limit: vi.fn(async () => rows),
+                    })),
+                  }
+                : { limit: vi.fn(async () => rows) },
+            ),
+          })),
+        };
+      }),
+      update: vi.fn(() => ({
+        set: vi.fn((value: { status: string }) => {
+          persistedStatus = value.status;
+          return {
+            where: vi.fn(() => ({
+              returning: vi.fn(async () => [{ id: "job-1" }]),
+            })),
+          };
+        }),
+      })),
+    };
+    mockedGetDb.mockReturnValue({
+      transaction: vi.fn((callback) => callback(transaction)),
+    } as never);
+    const candidate = {
+      "app.js": "",
+      "index.html": "",
+      "manifest.json": "{}",
+      "styles.css": "",
+    };
+
+    await expect(
+      persistGenerationAttempt({
+        candidateFiles: candidate,
+        diagnostic: "Artifact manifest must satisfy the required contract.",
+        expectedStatus: "validating",
+        jobId: "job-1",
+        kind: "generate",
+        outcome: "rejected",
+      }),
+    ).resolves.toBe("repairing");
+
+    expect(persistedStatus).toBe("repairing");
+    expect(inserted[0]).toMatchObject({
+      candidateFiles: candidate,
+      diagnostic: "Artifact manifest must satisfy the required contract.",
+      jobId: "job-1",
+      sequence: 3,
+    });
+    expect(inserted[1]).toMatchObject({
+      message:
+        "Attempt 3 persisted. Waiting for the next incremental repair.",
+      stage: "repairing",
     });
   });
 });

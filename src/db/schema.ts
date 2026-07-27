@@ -12,7 +12,11 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { GeneratedAppDataValue } from "@/lib/generated-app-data/contract";
-import type { GenerationStage } from "@/lib/generation/types";
+import type {
+  ArtifactFiles,
+  ArtifactRepairPatch,
+  GenerationStage,
+} from "@/lib/generation/types";
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -151,6 +155,51 @@ export const generationEvents = pgTable(
   ],
 );
 
+export const generationAttempts = pgTable(
+  "generation_attempts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => generationJobs.id, { onDelete: "cascade" }),
+    sequence: integer("sequence").notNull(),
+    kind: text("kind").$type<"generate" | "repair">().notNull(),
+    outcome: text("outcome")
+      .$type<"provider_failed" | "rejected">()
+      .notNull(),
+    candidateFiles: jsonb("candidate_files").$type<ArtifactFiles>(),
+    repairPatch: jsonb("repair_patch").$type<ArtifactRepairPatch>(),
+    diagnostic: text("diagnostic"),
+    providerError: text("provider_error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    check(
+      "generation_attempts_kind_check",
+      sql`${table.kind} in ('generate', 'repair')`,
+    ),
+    check(
+      "generation_attempts_outcome_check",
+      sql`${table.outcome} in ('provider_failed', 'rejected')`,
+    ),
+    check(
+      "generation_attempts_payload_check",
+      sql`(
+        (${table.outcome} = 'provider_failed' and ${table.providerError} is not null)
+        or
+        (${table.outcome} = 'rejected' and ${table.candidateFiles} is not null and ${table.diagnostic} is not null)
+      )`,
+    ),
+    index("generation_attempts_job_id_idx").on(table.jobId),
+    uniqueIndex("generation_attempts_job_sequence_idx").on(
+      table.jobId,
+      table.sequence,
+    ),
+  ],
+);
+
 export const artifactVersions = pgTable(
   "artifact_versions",
   {
@@ -202,5 +251,6 @@ export type Project = typeof projects.$inferSelect;
 export type BuildRequest = typeof buildRequests.$inferSelect;
 export type GenerationJob = typeof generationJobs.$inferSelect;
 export type GenerationEvent = typeof generationEvents.$inferSelect;
+export type GenerationAttempt = typeof generationAttempts.$inferSelect;
 export type ArtifactVersion = typeof artifactVersions.$inferSelect;
 export type GeneratedAppData = typeof generatedAppData.$inferSelect;

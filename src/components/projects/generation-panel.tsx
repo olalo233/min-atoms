@@ -1,10 +1,11 @@
 "use client";
 
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 
 import { PreviewFrame } from "@/components/preview/preview-frame";
 import {
   ACTIVE_GENERATION_STATUSES,
+  GENERATION_STEP_LEASE_MS,
   type GenerationSnapshot,
 } from "@/lib/generation/types";
 
@@ -74,7 +75,7 @@ function getStateCopy(status: string | null) {
       };
     case "repairing":
       return {
-        detail: "Validation found a bounded issue. One fix-forward repair is underway.",
+        detail: "The last candidate and diagnostic are persisted. The next incremental repair can continue safely.",
         label: "Repairing",
         tone: "repairing",
       };
@@ -117,6 +118,7 @@ export function GenerationPanel({
   const [isFollowingUp, setIsFollowingUp] = useState(false);
   const [followUp, setFollowUp] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const continuedRepairRef = useRef<string | null>(null);
   const status = generation.job?.status ?? null;
   const isActive = Boolean(status && activeStatuses.has(status));
   const isRetryable = status === "failed" || status === "cancelled";
@@ -128,6 +130,27 @@ export function GenerationPanel({
 
     let stopped = false;
     let timer: number | undefined;
+
+    async function continuePersistedRepair(next: GenerationSnapshot) {
+      if (!next.job) return;
+      const leaseExpired =
+        activeStatuses.has(next.job.status) &&
+        Date.now() - new Date(next.job.updatedAt).getTime() >=
+          GENERATION_STEP_LEASE_MS;
+      if (next.job.status !== "repairing" && !leaseExpired) return;
+      const repairKey = `${next.job.id}:${next.job.updatedAt}`;
+      if (continuedRepairRef.current === repairKey) return;
+      continuedRepairRef.current = repairKey;
+      try {
+        const response = await fetch(
+          `/api/projects/${projectId}/generation`,
+          { method: "POST" },
+        );
+        if (!response.ok) continuedRepairRef.current = null;
+      } catch {
+        continuedRepairRef.current = null;
+      }
+    }
 
     async function refresh() {
       try {
@@ -147,6 +170,7 @@ export function GenerationPanel({
               : current ?? next.artifactVersion,
           );
         });
+        await continuePersistedRepair(next);
       } catch {
         setError("Progress could not be refreshed. The persisted timeline is safe.");
       }

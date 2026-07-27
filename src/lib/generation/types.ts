@@ -6,6 +6,8 @@ export const ACTIVE_GENERATION_STATUSES = [
   "repairing",
 ] as const;
 
+export const GENERATION_STEP_LEASE_MS = 90_000;
+
 export const GENERATION_STAGES = [
   ...ACTIVE_GENERATION_STATUSES,
   "completed",
@@ -25,6 +27,16 @@ export const ARTIFACT_FILES = [
 
 export type ArtifactFileName = (typeof ARTIFACT_FILES)[number];
 export type ArtifactFiles = Record<ArtifactFileName, string>;
+
+export type ArtifactRepairOperation = {
+  content: string;
+  op: "replace-file";
+  path: ArtifactFileName;
+};
+
+export type ArtifactRepairPatch = {
+  operations: ArtifactRepairOperation[];
+};
 
 export type BaseArtifact = {
   files: ArtifactFiles;

@@ -1,24 +1,31 @@
-import {
-  claimGenerationJob,
-  completeGenerationJob,
-  failGenerationJob,
-  getGenerationInputForJob,
-  getGenerationSnapshotForJob,
-  updateGenerationStatus,
-} from "@/lib/generation/repository";
 import { deepSeekProvider } from "@/lib/generation/deepseek";
+import { applyArtifactRepair } from "@/lib/generation/patch";
 import {
   deterministicProvider,
   type GenerationProvider,
 } from "@/lib/generation/provider";
 import {
+  claimGenerationStep,
+  completeGenerationJob,
+  failGenerationJob,
+  getGenerationStepInput,
+  MAX_GENERATION_ATTEMPTS,
+  persistGenerationAttempt,
+  updateGenerationStatus,
+} from "@/lib/generation/repository";
+import { validateArtifactSmoke } from "@/lib/generation/smoke";
+import {
+  ARTIFACT_FILES,
+  type ArtifactFiles,
+  type ArtifactRepairPatch,
+  type GenerationInput,
+} from "@/lib/generation/types";
+import {
   getValidationDiagnostic,
   validateArtifact,
 } from "@/lib/generation/validator";
-import { validateArtifactSmoke } from "@/lib/generation/smoke";
 
 const runningJobs = new Set<string>();
-const MAX_REPAIR_ATTEMPTS = 2;
 
 function supportsConstrainedFallback(buildRequest: string): boolean {
   return /programmer calculator|程序员计算器/i.test(buildRequest);
@@ -30,112 +37,180 @@ function getConfiguredProvider(): GenerationProvider {
     : deepSeekProvider;
 }
 
+function readCandidate(input: unknown): ArtifactFiles | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const record = input as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== ARTIFACT_FILES.length ||
+    !ARTIFACT_FILES.every(
+      (path) =>
+        typeof record[path] === "string" &&
+        (record[path] as string).length <= 40_000,
+    )
+  ) {
+    return null;
+  }
+  return Object.fromEntries(
+    ARTIFACT_FILES.map((path) => [path, record[path]]),
+  ) as ArtifactFiles;
+}
+
+async function completeFallback(
+  jobId: string,
+  projectId: string,
+  input: GenerationInput,
+  expectedStatus: "generating" | "validating",
+): Promise<boolean> {
+  if (!supportsConstrainedFallback(input.buildRequest)) return false;
+  const files = validateArtifact(await deterministicProvider.generate(input));
+  await validateArtifactSmoke(files);
+  if (
+    !(await updateGenerationStatus(
+      jobId,
+      expectedStatus,
+      "validating",
+      "AI attempts exhausted. Validating the constrained calculator template.",
+    ))
+  ) {
+    return true;
+  }
+  await completeGenerationJob(jobId, projectId, files);
+  return true;
+}
+
+async function persistProviderFailure(
+  jobId: string,
+  projectId: string,
+  input: GenerationInput,
+  attemptCount: number,
+  kind: "generate" | "repair",
+  candidate: ArtifactFiles | null,
+  error: unknown,
+): Promise<void> {
+  if (
+    attemptCount + 1 >= MAX_GENERATION_ATTEMPTS &&
+    (await completeFallback(jobId, projectId, input, "generating"))
+  ) {
+    return;
+  }
+  const providerError =
+    error instanceof Error && /^provider_[a-z0-9_]+$/i.test(error.message)
+      ? error.message
+      : "provider_invalid_response";
+  await persistGenerationAttempt({
+    candidateFiles: candidate ?? undefined,
+    expectedStatus: "generating",
+    jobId,
+    kind,
+    outcome: "provider_failed",
+    providerError,
+  });
+}
+
 export async function runGenerationJob(
   jobId: string,
   provider: GenerationProvider = getConfiguredProvider(),
 ): Promise<void> {
-  if (runningJobs.has(jobId)) {
-    return;
-  }
+  if (runningJobs.has(jobId)) return;
 
   runningJobs.add(jobId);
-  let failureDiagnostic: string | undefined;
   try {
-    if (!(await claimGenerationJob(jobId))) {
+    const claim = await claimGenerationStep(jobId);
+    if (!claim) return;
+
+    const step = await getGenerationStepInput(jobId);
+    if (
+      claim.requiresGenerateTransition &&
+      !(await updateGenerationStatus(
+        jobId,
+        "planning",
+        "generating",
+        "Generating one persisted Candidate Artifact.",
+      ))
+    ) {
       return;
     }
 
-    const snapshot = await getGenerationSnapshotForJob(jobId);
-    if (!snapshot.job) {
-      throw new Error("Generation job not found.");
-    }
-
-    const input = await getGenerationInputForJob(jobId);
-    if (!(await updateGenerationStatus(
-      jobId,
-      "planning",
-      "generating",
-      "Generating the constrained four-file artifact.",
-    ))) {
-      return;
-    }
-    let files = await provider.generate(input);
-
-    if (!(await updateGenerationStatus(
-      jobId,
-      "generating",
-      "validating",
-      "Validating the exact artifact contract.",
-    ))) {
-      return;
-    }
-    let fallbackUsed = false;
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        await validateArtifactSmoke(validateArtifact(files));
-        break;
-      } catch (error) {
-        failureDiagnostic = getValidationDiagnostic(error);
-        if (!provider.repair || attempt >= MAX_REPAIR_ATTEMPTS) {
-          if (
-            !fallbackUsed &&
-            supportsConstrainedFallback(input.buildRequest)
-          ) {
-            if (!(await updateGenerationStatus(
-              jobId,
-              "validating",
-              "repairing",
-              "AI repairs exhausted. Recovering with the constrained calculator template.",
-            ))) {
-              return;
-            }
-            fallbackUsed = true;
-            files = await deterministicProvider.generate(input);
-            if (!(await updateGenerationStatus(
-              jobId,
-              "repairing",
-              "validating",
-              "Validating the constrained calculator template.",
-            ))) {
-              return;
-            }
-            continue;
-          }
-          throw new Error("artifact_invalid");
+    let candidate: ArtifactFiles;
+    let repairPatch: ArtifactRepairPatch | undefined;
+    try {
+      if (claim.mode === "repair") {
+        if (!step.candidate || !provider.repair) {
+          throw new Error("provider_unavailable");
         }
-        if (!(await updateGenerationStatus(
-          jobId,
-          "validating",
-          "repairing",
-          `Repairing validation finding ${attempt + 1} of ${MAX_REPAIR_ATTEMPTS}.`,
-        ))) {
-          return;
-        }
-        files = await provider.repair(input, files, failureDiagnostic);
-        if (!(await updateGenerationStatus(
-          jobId,
-          "repairing",
-          "validating",
-          "Validating the repaired artifact.",
-        ))) {
-          return;
-        }
+        const response = await provider.repair(
+          step.input,
+          step.candidate,
+          step.diagnostic ?? "Continue improving the constrained artifact.",
+        );
+        const repaired = applyArtifactRepair(step.candidate, response);
+        candidate = repaired.files;
+        repairPatch = repaired.patch;
+      } else {
+        const response = await provider.generate(step.input);
+        const generated = readCandidate(response);
+        if (!generated) throw new Error("provider_invalid_response");
+        candidate = generated;
       }
+    } catch (error) {
+      await persistProviderFailure(
+        jobId,
+        claim.projectId,
+        step.input,
+        step.attemptCount,
+        claim.mode,
+        step.candidate,
+        error,
+      );
+      return;
     }
-    await completeGenerationJob(
-      jobId,
-      snapshot.job.projectId,
-      validateArtifact(files),
-    );
+
+    if (
+      !(await updateGenerationStatus(
+        jobId,
+        "generating",
+        "validating",
+        claim.mode === "repair"
+          ? "Validating the incrementally repaired full candidate."
+          : "Validating the exact artifact contract.",
+      ))
+    ) {
+      return;
+    }
+
+    try {
+      const files = validateArtifact(candidate);
+      await validateArtifactSmoke(files);
+      await completeGenerationJob(jobId, claim.projectId, files);
+    } catch (error) {
+      const diagnostic = getValidationDiagnostic(error);
+      if (
+        step.attemptCount + 1 >= MAX_GENERATION_ATTEMPTS &&
+        (await completeFallback(
+          jobId,
+          claim.projectId,
+          step.input,
+          "validating",
+        ))
+      ) {
+        return;
+      }
+      await persistGenerationAttempt({
+        candidateFiles: candidate,
+        diagnostic,
+        expectedStatus: "validating",
+        jobId,
+        kind: claim.mode,
+        outcome: "rejected",
+        repairPatch,
+      });
+    }
   } catch (error) {
-    const message = error instanceof Error && /^provider_|^artifact_invalid$/.test(error.message)
-      ? error.message
-      : "generation_failed";
-    await failGenerationJob(
-      jobId,
-      message,
-      message === "artifact_invalid" ? failureDiagnostic : undefined,
-    );
+    const message =
+      error instanceof Error && /^provider_[a-z0-9_]+$/i.test(error.message)
+        ? error.message
+        : "generation_failed";
+    await failGenerationJob(jobId, message);
   } finally {
     runningJobs.delete(jobId);
   }

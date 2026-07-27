@@ -95,9 +95,13 @@ describe("DeepSeek artifact contract", () => {
     expect(instruction).toContain("Do not return the candidate unchanged");
     expect(instruction).toContain("#calculate");
     expect(instruction).toContain("#result");
+    expect(instruction).toContain('"op":"replace-file"');
+    expect(instruction).not.toContain(
+      "Return only a JSON object with exactly these string keys",
+    );
   });
 
-  it("retries one unusable provider response before returning an artifact", async () => {
+  it("returns one usable provider response without an in-invocation retry", async () => {
     process.env.DEEPSEEK_API_KEY = "test-key";
     const artifact = {
       "app.js": "",
@@ -105,20 +109,13 @@ describe("DeepSeek artifact contract", () => {
       "manifest.json": "{}",
       "styles.css": "",
     };
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ choices: [{ message: { content: "not json" } }] }),
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
           JSON.stringify({
             choices: [{ message: { content: JSON.stringify(artifact) } }],
           }),
         ),
-      );
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
@@ -127,10 +124,10 @@ describe("DeepSeek artifact contract", () => {
         buildRequest: "Build a calculator",
       }),
     ).resolves.toEqual(artifact);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("surfaces the provider error after the bounded retry is exhausted", async () => {
+  it("surfaces a provider error for persistence by the next durable step", async () => {
     process.env.DEEPSEEK_API_KEY = "test-key";
     const fetchMock = vi.fn().mockImplementation(async () =>
       new Response(
@@ -145,6 +142,6 @@ describe("DeepSeek artifact contract", () => {
         buildRequest: "Build a calculator",
       }),
     ).rejects.toThrow("provider_invalid_response");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
