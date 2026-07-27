@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db/client";
 import {
   claimGenerationJob,
   createGenerationJob,
+  failGenerationJob,
   updateGenerationStatus,
 } from "@/lib/generation/repository";
 
@@ -129,5 +130,67 @@ describe("generation status and event serialization", () => {
 
     expect(harness.operations).toEqual(["lock", "status"]);
     expect(harness.transaction.insert).not.toHaveBeenCalled();
+  });
+
+  it("persists a stable failure code and a safe actionable Generation Event", async () => {
+    const insertedEvents: Array<{ message: string; stage: string }> = [];
+    let selectCount = 0;
+    let persistedErrorMessage = "";
+    const transaction = {
+      execute: vi.fn(async () => undefined),
+      insert: vi.fn(() => ({
+        values: vi.fn(async (value: { message: string; stage: string }) => {
+          insertedEvents.push(value);
+        }),
+      })),
+      select: vi.fn(() => {
+        selectCount += 1;
+        if (selectCount === 1) {
+          return {
+            from: vi.fn(() => ({
+              where: vi.fn(() => ({
+                limit: vi.fn(async () => [{ projectId: "project-1" }]),
+              })),
+            })),
+          };
+        }
+        return {
+          from: vi.fn(() => ({
+            where: vi.fn(() => ({
+              orderBy: vi.fn(() => ({
+                limit: vi.fn(async () => [{ sequence: 6 }]),
+              })),
+            })),
+          })),
+        };
+      }),
+      update: vi.fn(() => ({
+        set: vi.fn((value: { errorMessage: string }) => {
+          persistedErrorMessage = value.errorMessage;
+          return {
+            where: vi.fn(() => ({
+              returning: vi.fn(async () => [{ id: "job-1" }]),
+            })),
+          };
+        }),
+      })),
+    };
+    mockedGetDb.mockReturnValue({
+      transaction: vi.fn((callback) => callback(transaction)),
+    } as never);
+
+    await failGenerationJob(
+      "job-1",
+      "artifact_invalid",
+      "Artifact manifest must satisfy the required contract.",
+    );
+
+    expect(persistedErrorMessage).toBe("artifact_invalid");
+    expect(insertedEvents).toHaveLength(1);
+    expect(insertedEvents[0]).toMatchObject({
+        message:
+          "Artifact rejected: Artifact manifest must satisfy the required contract.",
+        stage: "failed",
+    });
   });
 });

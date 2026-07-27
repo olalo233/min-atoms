@@ -231,7 +231,7 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
     result.dispose();
     if (actualText !== manifest.smoke.expect.text) {
       throw new SmokeExecutionFinding(
-        `Artifact smoke click did not produce the expected text. Expected ${JSON.stringify(manifest.smoke.expect.text.slice(0, 80))}; received ${JSON.stringify(actualText.slice(0, 80))}.`,
+        `Artifact smoke click ${manifest.smoke.selector} did not update ${manifest.smoke.expect.selector}. Expected ${JSON.stringify(manifest.smoke.expect.text.slice(0, 80))}; received ${JSON.stringify(actualText.slice(0, 80))}.`,
       );
     }
   } catch (error) {

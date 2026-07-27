@@ -2,6 +2,7 @@ import { ARTIFACT_FILES, type ArtifactFiles } from "@/lib/generation/types";
 import { readArtifactManifest } from "@/lib/generation/manifest";
 
 const MAX_FILE_SIZE = 40_000;
+const MAX_DIAGNOSTIC_SIZE = 640;
 const FORBIDDEN_CONTENT = [
   /https?:\/\//i,
   /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|importScripts)\s*\(/i,
@@ -37,7 +38,7 @@ function reject(message: string): never {
 
 export function getValidationDiagnostic(error: unknown): string {
   if (error instanceof ArtifactValidationError) {
-    return error.message.slice(0, 160);
+    return error.message.slice(0, MAX_DIAGNOSTIC_SIZE);
   }
   return "Artifact did not satisfy the required contract.";
 }
@@ -48,64 +49,78 @@ export function validateArtifact(input: unknown): ArtifactFiles {
   }
 
   const files = input as Record<string, unknown>;
+  const findings: string[] = [];
   const names = Object.keys(files).sort();
   const expectedNames = [...ARTIFACT_FILES].sort();
   if (
     names.length !== expectedNames.length ||
     names.some((name, index) => name !== expectedNames[index])
   ) {
-    reject("Artifact must contain exactly the four approved files.");
+    findings.push("Artifact must contain exactly the four approved files.");
   }
 
   for (const name of ARTIFACT_FILES) {
     const value = files[name];
     if (typeof value !== "string" || value.length > MAX_FILE_SIZE) {
-      reject(`Artifact file ${name} is invalid.`);
+      findings.push(`Artifact file ${name} is invalid.`);
+      continue;
     }
     if (FORBIDDEN_CONTENT.some((pattern) => pattern.test(value))) {
-      reject(`Artifact file ${name} uses a forbidden capability.`);
+      findings.push(`Artifact file ${name} uses a forbidden capability.`);
     }
   }
-  if (
+  if (typeof files["app.js"] === "string" &&
     FORBIDDEN_SCRIPT_CONTENT.some((pattern) =>
       pattern.test(files["app.js"] as string),
     )
   ) {
-    reject("Artifact app.js uses a forbidden runtime escape.");
+    findings.push("Artifact app.js uses a forbidden runtime escape.");
   }
 
-  const manifest = readArtifactManifest(files["manifest.json"] as string);
+  const manifest = typeof files["manifest.json"] === "string"
+    ? readArtifactManifest(files["manifest.json"])
+    : null;
   if (!manifest) {
-    reject("Artifact manifest must satisfy the required contract.");
-  }
-  const smokeContract = manifest.smoke;
-  const idSelector = /^#[A-Za-z][\w:-]{0,63}$/;
-  if (
-    !idSelector.test(smokeContract.selector) ||
-    !idSelector.test(smokeContract.expect.selector) ||
-    smokeContract.expect.text.length === 0 ||
-    smokeContract.expect.text.length > 256
-  ) {
-    reject("Artifact smoke interaction must use bounded ID selectors and text.");
-  }
-
-  try {
-    new Function(files["app.js"] as string);
-  } catch {
-    reject("Artifact app.js must be parseable JavaScript.");
-  }
-
-  const styles = files["styles.css"] as string;
-  let blockDepth = 0;
-  for (const character of styles) {
-    if (character === "{") blockDepth += 1;
-    if (character === "}") blockDepth -= 1;
-    if (blockDepth < 0) {
-      reject("Artifact styles.css must have balanced blocks.");
+    findings.push("Artifact manifest must satisfy the required contract.");
+  } else {
+    const smokeContract = manifest.smoke;
+    const idSelector = /^#[A-Za-z][\w:-]{0,63}$/;
+    if (
+      !idSelector.test(smokeContract.selector) ||
+      !idSelector.test(smokeContract.expect.selector) ||
+      smokeContract.expect.text.length === 0 ||
+      smokeContract.expect.text.length > 256
+    ) {
+      findings.push(
+        "Artifact smoke interaction must use bounded ID selectors and text.",
+      );
     }
   }
-  if (blockDepth !== 0) {
-    reject("Artifact styles.css must have balanced blocks.");
+
+  if (typeof files["app.js"] === "string") {
+    try {
+      new Function(files["app.js"]);
+    } catch {
+      findings.push("Artifact app.js must be parseable JavaScript.");
+    }
+  }
+
+  if (typeof files["styles.css"] === "string") {
+    let blockDepth = 0;
+    for (const character of files["styles.css"]) {
+      if (character === "{") blockDepth += 1;
+      if (character === "}") blockDepth -= 1;
+      if (blockDepth < 0) {
+        break;
+      }
+    }
+    if (blockDepth !== 0) {
+      findings.push("Artifact styles.css must have balanced blocks.");
+    }
+  }
+
+  if (findings.length > 0) {
+    reject(findings.join(" "));
   }
 
   return {

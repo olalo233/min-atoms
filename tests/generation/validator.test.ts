@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { deterministicProvider } from "@/lib/generation/provider";
 import { validateArtifactSmoke } from "@/lib/generation/smoke";
-import { validateArtifact } from "@/lib/generation/validator";
+import {
+  getValidationDiagnostic,
+  validateArtifact,
+} from "@/lib/generation/validator";
 
 describe("deterministic artifact contract", () => {
   it("accepts exactly the four provider files", async () => {
@@ -117,6 +120,26 @@ describe("deterministic artifact contract", () => {
     expect(() =>
       validateArtifact({ ...valid, "styles.css": "} .app {" }),
     ).toThrow("balanced blocks");
+  });
+
+  it("reports all deterministic findings in one bounded repair diagnostic", () => {
+    let diagnostic = "";
+    try {
+      validateArtifact({
+        "app.js": "const = ;",
+        "index.html": '<form id="unsafe"></form>',
+        "manifest.json": "{}",
+        "styles.css": "}",
+      });
+    } catch (error) {
+      diagnostic = getValidationDiagnostic(error);
+    }
+
+    expect(diagnostic).toContain("index.html uses a forbidden capability");
+    expect(diagnostic).toContain("manifest must satisfy the required contract");
+    expect(diagnostic).toContain("app.js must be parseable JavaScript");
+    expect(diagnostic).toContain("styles.css must have balanced blocks");
+    expect(diagnostic.length).toBeLessThanOrEqual(640);
   });
 
   it("allows class constructors while blocking constructor-chain escapes", () => {

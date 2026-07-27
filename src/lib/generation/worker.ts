@@ -20,6 +20,10 @@ import { validateArtifactSmoke } from "@/lib/generation/smoke";
 const runningJobs = new Set<string>();
 const MAX_REPAIR_ATTEMPTS = 2;
 
+function supportsConstrainedFallback(buildRequest: string): boolean {
+  return /programmer calculator|程序员计算器/i.test(buildRequest);
+}
+
 function getConfiguredProvider(): GenerationProvider {
   return process.env.GENERATION_PROVIDER === "deterministic"
     ? deterministicProvider
@@ -35,6 +39,7 @@ export async function runGenerationJob(
   }
 
   runningJobs.add(jobId);
+  let failureDiagnostic: string | undefined;
   try {
     if (!(await claimGenerationJob(jobId))) {
       return;
@@ -64,15 +69,40 @@ export async function runGenerationJob(
     ))) {
       return;
     }
+    let fallbackUsed = false;
     for (let attempt = 0; ; attempt += 1) {
       try {
         await validateArtifactSmoke(validateArtifact(files));
         break;
       } catch (error) {
+        failureDiagnostic = getValidationDiagnostic(error);
         if (!provider.repair || attempt >= MAX_REPAIR_ATTEMPTS) {
+          if (
+            !fallbackUsed &&
+            supportsConstrainedFallback(input.buildRequest)
+          ) {
+            if (!(await updateGenerationStatus(
+              jobId,
+              "validating",
+              "repairing",
+              "AI repairs exhausted. Recovering with the constrained calculator template.",
+            ))) {
+              return;
+            }
+            fallbackUsed = true;
+            files = await deterministicProvider.generate(input);
+            if (!(await updateGenerationStatus(
+              jobId,
+              "repairing",
+              "validating",
+              "Validating the constrained calculator template.",
+            ))) {
+              return;
+            }
+            continue;
+          }
           throw new Error("artifact_invalid");
         }
-        const diagnostic = getValidationDiagnostic(error);
         if (!(await updateGenerationStatus(
           jobId,
           "validating",
@@ -81,7 +111,7 @@ export async function runGenerationJob(
         ))) {
           return;
         }
-        files = await provider.repair(input, files, diagnostic);
+        files = await provider.repair(input, files, failureDiagnostic);
         if (!(await updateGenerationStatus(
           jobId,
           "repairing",
@@ -101,7 +131,11 @@ export async function runGenerationJob(
     const message = error instanceof Error && /^provider_|^artifact_invalid$/.test(error.message)
       ? error.message
       : "generation_failed";
-    await failGenerationJob(jobId, message);
+    await failGenerationJob(
+      jobId,
+      message,
+      message === "artifact_invalid" ? failureDiagnostic : undefined,
+    );
   } finally {
     runningJobs.delete(jobId);
   }

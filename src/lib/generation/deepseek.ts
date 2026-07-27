@@ -7,7 +7,8 @@ import {
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash";
-const REQUEST_TIMEOUT_MS = 20_000;
+const REQUEST_TIMEOUT_MS = 45_000;
+const MAX_PROVIDER_ATTEMPTS = 2;
 const MAX_PROVIDER_RESPONSE_SIZE = 180_000;
 
 type DeepSeekResponse = {
@@ -26,7 +27,7 @@ function getDeepSeekConfiguration() {
   };
 }
 
-async function requestArtifact(
+async function requestArtifactOnce(
   input: GenerationInput,
   repairCandidate?: unknown,
   repairDiagnostic?: string,
@@ -96,6 +97,43 @@ async function requestArtifact(
     throw new Error("provider_unavailable");
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+function isRetryableProviderError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (
+    error.message === "provider_invalid_response" ||
+    error.message === "provider_unavailable"
+  ) {
+    return true;
+  }
+  const status = /^provider_http_(\d{3})$/.exec(error.message)?.[1];
+  if (!status) return false;
+  const code = Number(status);
+  return code === 408 || code === 425 || code === 429 || code >= 500;
+}
+
+async function requestArtifact(
+  input: GenerationInput,
+  repairCandidate?: unknown,
+  repairDiagnostic?: string,
+): Promise<unknown> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await requestArtifactOnce(
+        input,
+        repairCandidate,
+        repairDiagnostic,
+      );
+    } catch (error) {
+      if (
+        attempt >= MAX_PROVIDER_ATTEMPTS ||
+        !isRetryableProviderError(error)
+      ) {
+        throw error;
+      }
+    }
   }
 }
 

@@ -54,5 +54,97 @@ describe("DeepSeek artifact contract", () => {
     expect(instruction).toContain("one signature element");
     expect(instruction).toContain("platform loads the preset stylesheet");
     expect(instruction).toContain("never add link or script tags");
+    expect(instruction).toContain("7 + 1");
+    expect(instruction).toContain('expect text "8"');
+  });
+
+  it("requires a repair response to change the rejected candidate", async () => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  "app.js": "",
+                  "index.html": "",
+                  "manifest.json": "{}",
+                  "styles.css": "",
+                }),
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deepSeekProvider.repair?.(
+      { baseArtifact: null, buildRequest: "Build a calculator" },
+      { rejected: true },
+      "Artifact smoke click #calculate did not update #result.",
+    );
+
+    const request = JSON.parse(
+      String((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
+    ) as { messages: Array<{ content: string; role: string }> };
+    const instruction = request.messages.find(
+      (message) => message.role === "user",
+    )?.content;
+    expect(instruction).toContain("Do not return the candidate unchanged");
+    expect(instruction).toContain("#calculate");
+    expect(instruction).toContain("#result");
+  });
+
+  it("retries one unusable provider response before returning an artifact", async () => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    const artifact = {
+      "app.js": "",
+      "index.html": "",
+      "manifest.json": "{}",
+      "styles.css": "",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: "not json" } }] }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(artifact) } }],
+          }),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      deepSeekProvider.generate({
+        baseArtifact: null,
+        buildRequest: "Build a calculator",
+      }),
+    ).resolves.toEqual(artifact);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces the provider error after the bounded retry is exhausted", async () => {
+    process.env.DEEPSEEK_API_KEY = "test-key";
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({ choices: [{ message: { content: "not json" } }] }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      deepSeekProvider.generate({
+        baseArtifact: null,
+        buildRequest: "Build a calculator",
+      }),
+    ).rejects.toThrow("provider_invalid_response");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

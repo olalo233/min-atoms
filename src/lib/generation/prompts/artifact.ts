@@ -12,7 +12,7 @@ export function buildArtifactInstruction(
   repairDiagnostic?: string,
 ): string {
   const repair = repairDiagnostic
-    ? `\nValidation finding: ${repairDiagnostic}\nCandidate artifact JSON: ${JSON.stringify(repairCandidate).slice(0, MAX_CONTEXT_SIZE)}\nRepair only what is necessary while preserving valid behavior and the established visual direction.`
+    ? `\nValidation finding: ${repairDiagnostic}\nCandidate artifact JSON: ${JSON.stringify(repairCandidate).slice(0, MAX_CONTEXT_SIZE)}\nRepair only what is necessary while preserving valid behavior and the established visual direction. Do not return the candidate unchanged: trace the named selectors, explicit input values, click handler, and expected text, then change the files that cause the finding.`
     : "";
   const presets = Object.entries(UI_PRESETS)
     .map(([name, preset]) => `- ${name}: ${preset.description}`)
@@ -29,6 +29,7 @@ export function buildArtifactInstruction(
     "The artifact must be fully self-contained apart from the platform-loaded CSS preset. Do not rely on undeclared globals, packages, CDN scripts, or third-party JavaScript such as marked. When the request mentions Markdown, render representative Markdown without external libraries.",
     "app.js may use document.addEventListener for DOMContentLoaded, document.getElementById, document.querySelector/querySelectorAll with simple ID, class, tag, or attribute selectors, and element textContent, value, dataset, style, classList, getAttribute/setAttribute, and addEventListener.",
     "The smoke runtime seeds each element value only from that element's own HTML value attribute and does not infer a select value from its selected option. Set every value needed by the smoke click explicitly, use safe fallbacks such as operator.value || '+', and make the click synchronously update the expected element without timers or layout measurements.",
+    'For a calculator, make the smoke scenario execute 7 + 1: set explicit HTML values 7 and 1 and operator +, click the primary calculate control, then expect text "8" in the result. Do not use a reset, clear, digit, or mode button as the smoke action.',
     'manifest.json must be a JSON-encoded string shaped exactly like {"entry":"index.html","ui":{"preset":"pico-2"},"smoke":{"selector":"#increment","action":"click","expect":{"selector":"#count","text":"1"}}}. The preset must be one of the listed preset IDs; both selectors must be IDs present in index.html.',
     input.baseArtifact
       ? `Base Version v${input.baseArtifact.version} artifact JSON: ${JSON.stringify(input.baseArtifact.files).slice(0, MAX_CONTEXT_SIZE)}`

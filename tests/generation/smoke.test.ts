@@ -25,7 +25,7 @@ describe("artifact smoke validation", () => {
     };
 
     await expect(validateArtifactSmoke(files)).rejects.toThrow(
-      'Artifact smoke click did not produce the expected text. Expected "1"; received "0".',
+      'Artifact smoke click #increment did not update #count. Expected "1"; received "0".',
     );
   });
 

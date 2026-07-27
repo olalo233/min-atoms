@@ -304,6 +304,7 @@ export async function completeGenerationJob(
 export async function failGenerationJob(
   jobId: string,
   message: string,
+  detail?: string,
 ): Promise<void> {
   await getDb().transaction(async (transaction) => {
     const [job] = await transaction
@@ -334,9 +335,17 @@ export async function failGenerationJob(
       .where(eq(generationEvents.jobId, jobId))
       .orderBy(desc(generationEvents.sequence))
       .limit(1);
+    const safeDetail = detail
+      ?.replace(/[\r\n\t]+/g, " ")
+      .replace(/"[^"]*"/g, '"[redacted]"')
+      .slice(0, 640)
+      .trim();
     await transaction.insert(generationEvents).values({
       jobId,
-      message,
+      message:
+        message === "artifact_invalid" && safeDetail
+          ? `Artifact rejected: ${safeDetail}`
+          : message,
       sequence: (lastEvent?.sequence ?? 0) + 1,
       stage: "failed",
     });

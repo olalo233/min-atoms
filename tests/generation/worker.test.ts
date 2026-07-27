@@ -283,8 +283,54 @@ describe("generation worker", () => {
     expect(repository.failGenerationJob).toHaveBeenCalledWith(
       "job-4",
       "artifact_invalid",
+      "Artifact manifest must satisfy the required contract.",
     );
     expect(provider.repair).toHaveBeenCalledTimes(2);
     expect(repository.updateGenerationStatus).toHaveBeenCalledTimes(6);
+  });
+
+  it("uses the constrained calculator fallback after AI repairs are exhausted", async () => {
+    repository.claimGenerationJob.mockResolvedValue(true);
+    repository.getGenerationSnapshotForJob.mockResolvedValue({
+      artifactVersion: null,
+      events: [],
+      job: {
+        buildRequestId: "request-calculator",
+        completedAt: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        errorMessage: null,
+        id: "job-calculator",
+        projectId: "project-calculator",
+        status: "planning",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+    repository.getGenerationInputForJob.mockResolvedValue({
+      baseArtifact: null,
+      buildRequest: "构建一个现代化的程序员计算器",
+    });
+    const invalid = { ...files, "manifest.json": "{}" };
+    const provider: GenerationProvider = {
+      generate: vi.fn().mockResolvedValue(invalid),
+      repair: vi.fn().mockResolvedValue(invalid),
+    };
+
+    await runGenerationJob("job-calculator", provider);
+
+    expect(repository.failGenerationJob).not.toHaveBeenCalled();
+    expect(repository.completeGenerationJob).toHaveBeenCalledWith(
+      "job-calculator",
+      "project-calculator",
+      expect.objectContaining({
+        "index.html": expect.stringContaining("Programmer calculator"),
+        "manifest.json": expect.stringContaining('"#calculate"'),
+      }),
+    );
+    expect(repository.updateGenerationStatus).toHaveBeenCalledWith(
+      "job-calculator",
+      "validating",
+      "repairing",
+      "AI repairs exhausted. Recovering with the constrained calculator template.",
+    );
   });
 });
