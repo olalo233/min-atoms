@@ -841,7 +841,7 @@ details.proof-panel {
 
 details.proof-panel[open] {
   display: grid;
-  max-height: min(16rem, 36dvh);
+  height: min(16rem, 36dvh);
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 }
@@ -1453,7 +1453,7 @@ details.proof-panel > .generation-timeline {
   }
 
   details.proof-panel[open] {
-    max-height: 28rem;
+    height: min(28rem, 60dvh);
   }
 
   .preview-frame {
