@@ -36,7 +36,10 @@ export function ProjectWorkbenchFallback() {
             </div>
             <div className="waiting-aperture">
               <span className="waiting-mark" />
-              <p>The project shell is ready. Loading the latest version…</p>
+              <p>
+                The project workspace is ready. Loading its latest persisted
+                state…
+              </p>
             </div>
           </div>
         </div>

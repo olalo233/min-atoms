@@ -21,7 +21,10 @@ describe("project route loading state", () => {
     render(<LoadingProject />);
 
     expect(
-      screen.getByRole("heading", { name: "Opening project…" }),
+      screen.getByRole("heading", { name: "Opening project workspace…" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Loading the latest project state."),
     ).toBeVisible();
     expect(screen.getByText("You and the Agent")).toBeVisible();
     expect(screen.getByText("Loading project state")).toBeVisible();

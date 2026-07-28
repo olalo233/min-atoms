@@ -1,6 +1,13 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import type { ArtifactFiles } from "@/lib/generation/types";
 import {
@@ -21,6 +28,10 @@ export type PreviewFrameProps = {
 };
 
 export const PREVIEW_SANDBOX = "allow-scripts";
+const RELOAD_LOOP_DETAIL =
+  "Artifact repeatedly reloaded its preview document. Update the current DOM instead of calling location.reload().";
+type RuntimeDiagnosticResult = "failed" | "not_queued" | "queued";
+type ReloadRepairStatus = RuntimeDiagnosticResult | "reporting";
 
 async function requestGeneratedAppData(request: PreviewDataRequest): Promise<{ data?: unknown }> {
   const basePath = `/api/projects/${encodeURIComponent(request.projectId)}/generated-app-data`;
@@ -63,8 +74,13 @@ function PreviewFrameComponent({
   projectId,
 }: PreviewFrameProps) {
   const bridgeReadyRef = useRef(false);
+  const [blockedPreview, setBlockedPreview] = useState<{
+    srcDoc: string;
+    status: ReloadRepairStatus;
+  } | null>(null);
   const loadedSrcDocRef = useRef<string | null>(null);
   const previewDocumentActiveRef = useRef(false);
+  const reloadReportSrcDocRef = useRef<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const srcDoc = useMemo(
     () => buildPreviewDocument(files, { artifactVersionId, projectId }),
@@ -83,18 +99,8 @@ function PreviewFrameComponent({
       "*",
     );
   }, [artifactVersionId, projectId]);
-  const handleFrameLoad = useCallback(() => {
-    if (loadedSrcDocRef.current === srcDoc) {
-      previewDocumentActiveRef.current = false;
-      bridgeReadyRef.current = false;
-      return;
-    }
-    loadedSrcDocRef.current = srcDoc;
-    previewDocumentActiveRef.current = true;
-    announceBridgeReady();
-  }, [announceBridgeReady, srcDoc]);
   const reportRuntimeDiagnostic = useCallback(
-    async (diagnostic: RuntimeDiagnostic) => {
+    async (diagnostic: RuntimeDiagnostic): Promise<RuntimeDiagnosticResult> => {
       try {
         const response = await fetch(
           `/api/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(artifactVersionId)}/runtime-diagnostic`,
@@ -107,16 +113,51 @@ function PreviewFrameComponent({
             method: "POST",
           },
         );
-        if (!response.ok) return;
+        if (!response.ok) return "failed";
         const snapshot = (await response.json()) as GenerationSnapshot;
         onRuntimeRepairQueued?.(snapshot);
+        return response.status === 202 ? "queued" : "not_queued";
       } catch {
         // The Artifact Version remains visible; a transient reporting failure
         // must not replace the real browser error with a platform error.
+        return "failed";
       }
     },
     [artifactVersionId, onRuntimeRepairQueued, projectId],
   );
+  const queueReloadRepair = useCallback(async () => {
+    setBlockedPreview({ srcDoc, status: "reporting" });
+    const result = await reportRuntimeDiagnostic({
+      artifactVersionId,
+      detail: RELOAD_LOOP_DETAIL,
+      kind: "reload_loop",
+      projectId,
+      type: "min-atoms-runtime-diagnostic",
+    });
+    setBlockedPreview((current) =>
+      current?.srcDoc === srcDoc
+        ? { srcDoc, status: result }
+        : current,
+    );
+  }, [artifactVersionId, projectId, reportRuntimeDiagnostic, srcDoc]);
+  const handleFrameLoad = useCallback(() => {
+    if (loadedSrcDocRef.current === srcDoc) {
+      previewDocumentActiveRef.current = false;
+      bridgeReadyRef.current = false;
+      if (reloadReportSrcDocRef.current !== srcDoc) {
+        reloadReportSrcDocRef.current = srcDoc;
+        void queueReloadRepair();
+      }
+      return;
+    }
+    loadedSrcDocRef.current = srcDoc;
+    previewDocumentActiveRef.current = true;
+    announceBridgeReady();
+  }, [
+    announceBridgeReady,
+    queueReloadRepair,
+    srcDoc,
+  ]);
 
   useEffect(() => {
     const alreadyLoaded = loadedSrcDocRef.current === srcDoc;
@@ -128,7 +169,9 @@ function PreviewFrameComponent({
       isActiveDocument: () => previewDocumentActiveRef.current,
       platformRequest: requestGeneratedAppData,
       projectId,
-      runtimeReport: reportRuntimeDiagnostic,
+      runtimeReport: async (diagnostic) => {
+        await reportRuntimeDiagnostic(diagnostic);
+      },
     });
     bridgeReadyRef.current = true;
     if (alreadyLoaded) {
@@ -154,15 +197,49 @@ function PreviewFrameComponent({
         <span>Interactive Preview</span>
         <span className="preview-lock">Sandboxed · owner-scoped data</span>
       </div>
-      <iframe
-        className="preview-frame"
-        onLoad={handleFrameLoad}
-        ref={iframeRef}
-        referrerPolicy="no-referrer"
-        sandbox={PREVIEW_SANDBOX}
-        srcDoc={srcDoc}
-        title="Interactive generated preview"
-      />
+      {blockedPreview?.srcDoc === srcDoc ? (
+        <div
+          aria-label="Preview reload stopped"
+          className="preview-runtime-guard"
+          role="status"
+        >
+          <span className="loading-mark" aria-hidden="true" />
+          <strong>Preview reload stopped</strong>
+          <p>
+            {blockedPreview.status === "queued"
+              ? "The Agent is repairing a reload loop."
+              : blockedPreview.status === "failed"
+                ? "The repair request could not be sent."
+                : blockedPreview.status === "not_queued"
+                  ? "The reload was stopped, but no new repair was queued."
+                : "Sending the reload error to the Agent…"}
+          </p>
+          <small>
+            The last artifact repeatedly refreshed its iframe, so min-atoms
+            paused it instead of flashing the page.
+          </small>
+          {blockedPreview.status === "failed" ||
+          blockedPreview.status === "not_queued" ? (
+            <button
+              className="secondary-button"
+              onClick={() => void queueReloadRepair()}
+              type="button"
+            >
+              Retry repair
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <iframe
+          className="preview-frame"
+          onLoad={handleFrameLoad}
+          ref={iframeRef}
+          referrerPolicy="no-referrer"
+          sandbox={PREVIEW_SANDBOX}
+          srcDoc={srcDoc}
+          title="Interactive generated preview"
+        />
+      )}
     </div>
   );
 }

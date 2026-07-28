@@ -103,6 +103,24 @@ describe("artifact smoke validation", () => {
     );
   });
 
+  it("rejects a preview that reloads itself during startup", async () => {
+    const files = {
+      ...(await validFiles()),
+      "app.js": `
+        function showCurrentRoute() {
+          if (!window.location.hash) {
+            window.location.reload();
+          }
+        }
+        showCurrentRoute();
+      `,
+    };
+
+    await expect(validateArtifactSmoke(files)).rejects.toThrow(
+      "Artifact smoke script failed: Unsupported preview navigation: location.reload(). Update the current DOM instead.",
+    );
+  });
+
   it("runs a DOMContentLoaded wrapper before the declared interaction", async () => {
     const files = {
       ...(await validFiles()),

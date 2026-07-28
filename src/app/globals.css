@@ -219,6 +219,19 @@ h3 {
   gap: 1rem;
 }
 
+.creation-transition {
+  margin: 0;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--violet) 28%, var(--rule));
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--violet) 8%, var(--surface));
+  color: var(--muted);
+}
+
+.creation-transition strong {
+  color: var(--ink);
+}
+
 .field {
   display: grid;
   gap: 0.45rem;
@@ -1182,6 +1195,31 @@ details.proof-panel > .generation-timeline {
   min-height: 0;
   border: 0;
   background: #ffffff;
+}
+
+.preview-runtime-guard {
+  display: grid;
+  min-height: 24rem;
+  place-content: center;
+  justify-items: center;
+  gap: 0.55rem;
+  padding: 2rem;
+  background:
+    radial-gradient(circle at center, var(--violet-soft), transparent 45%),
+    var(--surface);
+  color: var(--muted);
+  text-align: center;
+}
+
+.preview-runtime-guard strong {
+  color: var(--ink);
+  font-size: 1.05rem;
+}
+
+.preview-runtime-guard p,
+.preview-runtime-guard small {
+  max-width: 34rem;
+  margin: 0;
 }
 
 .preview-waiting {

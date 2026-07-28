@@ -214,6 +214,16 @@ export async function validateArtifactSmoke(files: ArtifactFiles): Promise<void>
       window.document = document;
       window.addEventListener = () => {};
       window.removeEventListener = () => {};
+      let __locationHash = "";
+      window.location = {
+        get hash() { return __locationHash; },
+        set hash(value) { __locationHash = String(value); },
+        reload() {
+          throw new Error(
+            "Unsupported preview navigation: location.reload(). Update the current DOM instead.",
+          );
+        },
+      };
       window.minAtomsData = {
         delete: async () => true,
         get: async () => null,

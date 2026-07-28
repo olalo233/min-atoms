@@ -1,6 +1,9 @@
 const MAX_RUNTIME_DIAGNOSTIC_LENGTH = 640;
 
-export type RuntimeDiagnosticKind = "error" | "unhandledrejection";
+export type RuntimeDiagnosticKind =
+  | "error"
+  | "reload_loop"
+  | "unhandledrejection";
 
 export type RuntimeDiagnostic = {
   artifactVersionId: string;
@@ -22,7 +25,11 @@ export function parseRuntimeDiagnostic(value: unknown): RuntimeDiagnostic | null
   const message = value as Record<string, unknown>;
   if (
     message.type !== "min-atoms-runtime-diagnostic" ||
-    (message.kind !== "error" && message.kind !== "unhandledrejection") ||
+    (
+      message.kind !== "error" &&
+      message.kind !== "reload_loop" &&
+      message.kind !== "unhandledrejection"
+    ) ||
     !isIdentifier(message.projectId) ||
     !isIdentifier(message.artifactVersionId) ||
     typeof message.detail !== "string"

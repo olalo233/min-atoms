@@ -12,7 +12,7 @@ export const maxDuration = 120;
 
 const runtimeDiagnosticSchema = z.object({
   detail: z.string().trim().min(1).max(640),
-  kind: z.enum(["error", "unhandledrejection"]),
+  kind: z.enum(["error", "reload_loop", "unhandledrejection"]),
 });
 
 type RouteContext = {

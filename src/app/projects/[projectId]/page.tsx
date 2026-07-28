@@ -7,6 +7,7 @@ import { ProjectWorkbenchFallback } from "@/components/projects/project-workbenc
 import type { OwnedProjectPageSeed } from "@/lib/projects/page-data";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getProjectGenerationSnapshot } from "@/lib/generation/repository";
+import { ACTIVE_GENERATION_STATUSES } from "@/lib/generation/types";
 import { getProjectMessages } from "@/lib/projects/messages";
 import { getOwnedProjectPageSeed } from "@/lib/projects/page-data";
 
@@ -45,6 +46,9 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
   if (!seed) {
     notFound();
   }
+  const generationIsActive = seed.job
+    ? ACTIVE_GENERATION_STATUSES.some((status) => status === seed.job?.status)
+    : false;
 
   return (
     <main className="shell builder-shell" id="main-content">
@@ -61,8 +65,10 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
           <span className="brand-mark" aria-hidden="true">m/a</span>
           <span>min-atoms</span>
         </p>
-        <p className="project-status">
-          The agent works beside the live preview. Stop it anytime.
+        <p aria-live="polite" className="project-status">
+          {generationIsActive
+            ? "Your request is saved. The Agent is generating the next preview."
+            : "The Agent works beside the live preview. Stop it anytime."}
         </p>
       </header>
       <Suspense fallback={<ProjectWorkbenchFallback />}>

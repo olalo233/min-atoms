@@ -17,7 +17,7 @@ export default function LoadingProject() {
           <span className="project-header-divider" aria-hidden="true" />
           <div>
             <p className="eyebrow">Project</p>
-            <h1>Opening project…</h1>
+            <h1>Opening project workspace…</h1>
           </div>
         </div>
         <p className="brand-lockup">

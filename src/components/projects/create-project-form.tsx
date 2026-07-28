@@ -7,7 +7,10 @@ export function CreateProjectForm() {
   const router = useRouter();
   const [buildRequest, setBuildRequest] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitPhase, setSubmitPhase] = useState<
+    "creating" | "idle" | "opening"
+  >("idle");
+  const isSubmitting = submitPhase !== "idle";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -18,7 +21,8 @@ export function CreateProjectForm() {
       return;
     }
 
-    setIsSubmitting(true);
+    let projectCreated = false;
+    setSubmitPhase("creating");
     try {
       const response = await fetch("/api/projects", {
         method: "POST",
@@ -35,12 +39,15 @@ export function CreateProjectForm() {
         return;
       }
 
+      projectCreated = true;
+      setSubmitPhase("opening");
       router.push(`/projects/${body.project.id}`);
-      router.refresh();
     } catch {
       setError("Unable to create the project. Please try again.");
     } finally {
-      setIsSubmitting(false);
+      if (!projectCreated) {
+        setSubmitPhase("idle");
+      }
     }
   }
 
@@ -69,13 +76,29 @@ export function CreateProjectForm() {
         </span>
       </div>
       {error ? <p className="error" role="alert">{error}</p> : null}
+      {submitPhase === "opening" ? (
+        <p
+          aria-label="Project created"
+          className="creation-transition"
+          role="status"
+        >
+          <strong>Project created.</strong> Your request is saved and the Agent
+          is generating the first version.
+        </p>
+      ) : null}
       <button
         aria-busy={isSubmitting}
         className="primary-button"
         disabled={isSubmitting}
         type="submit"
       >
-        {isSubmitting ? <><span className="loading-mark" aria-hidden="true" />Creating project…</> : "Create project"}
+        {submitPhase === "opening" ? (
+          <><span className="loading-mark" aria-hidden="true" />Project created · Opening generator…</>
+        ) : submitPhase === "creating" ? (
+          <><span className="loading-mark" aria-hidden="true" />Creating project…</>
+        ) : (
+          "Create project"
+        )}
       </button>
     </form>
   );
