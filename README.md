@@ -63,9 +63,9 @@ users, Projects, Build Requests, jobs, events, artifact versions, and generated
 data. The generation provider is replaceable: deterministic output supports
 tests, while the server-side DeepSeek provider returns a constrained four-file
 artifact (`index.html`, `styles.css`, `app.js`, `manifest.json`). A validator
-limits shape, size, and browser capabilities. QuickJS/WASM then runs the
-manifest-declared click with strict time and memory limits before one bounded
-repair attempt.
+limits shape and size and checks the manifest and JavaScript syntax.
+QuickJS/WASM then runs the manifest-declared click with strict time and memory
+limits as one repair signal inside a bounded loop of up to ten total attempts.
 
 Passwords are bcrypt-hashed with a salt. Sessions are opaque, HMAC-hashed,
 HttpOnly, SameSite cookies; login failures are generic and rate-limited. The
@@ -81,7 +81,7 @@ validated interactive previews, persistent generated data, follow-up Build
 Requests, immutable version history, and explicit restore of a successful
 version. It deliberately does not offer public registration, source editing,
 arbitrary dependencies, external network access from generated apps, or cloud
-deployment.
+deployment outside the configured Vercel and Supabase production stack.
 
 The constrained artifact format makes safety and repeatable evaluation more
 important than general-purpose code generation. The browser acceptance command
@@ -100,6 +100,8 @@ responsive, keyboard, and reduced-motion quality floors.
 Artifacts select one platform-controlled CSS preset in `manifest.json`:
 `min-atoms-base`, `pico-2`, or `bootstrap-5`. The Preview resolves that ID from
 an internal catalog and injects its fixed CDN stylesheet under a narrowly
-generated CSP. Generated HTML cannot provide URLs, `<link>` tags, remote
-scripts, or arbitrary packages. CSS presets improve the baseline without
-granting third-party JavaScript access to the sandbox or generated app data.
+generated CSP. Generated artifacts may use semantic HTML and ordinary browser
+APIs, while the CSP and iframe sandbox block external network access,
+top-level navigation, submissions, popups, and downloads. CSS presets improve
+the baseline without granting third-party JavaScript access to generated app
+data.
