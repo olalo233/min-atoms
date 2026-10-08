@@ -1,0 +1,14 @@
+[Unit]
+Description=Block min-atoms containers from VM metadata
+Requires=docker.service
+After=docker.service
+PartOf=docker.service
+Before=ma-gateway.service ma-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/min-atoms/infra/vm/firewall.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=docker.service

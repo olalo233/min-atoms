@@ -1,0 +1,18 @@
+[Unit]
+Description=min-atoms manager (health stub until deployed)
+Requires=ma-firewall.service ma-gateway.service
+After=network-online.target ma-firewall.service ma-gateway.service
+PartOf=docker.service
+
+[Service]
+WorkingDirectory=/opt/min-atoms
+EnvironmentFile=/etc/min-atoms/env
+UnsetEnvironment=DEEPSEEK_API_KEY
+Environment=HOST=127.0.0.1 PORT=8090
+ExecStartPre=/usr/sbin/iptables -C DOCKER-USER -d 169.254.169.254 -j DROP
+ExecStart=/bin/bash /opt/min-atoms/infra/vm/manager.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=docker.service
