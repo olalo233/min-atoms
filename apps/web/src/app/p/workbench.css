@@ -1,0 +1,59 @@
+/* Workbench-scoped styles (T16). Global layout/baseline belong to T15. */
+
+.wb-root {
+  font-family: "PingFang SC", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.wb-hidden {
+  display: none;
+}
+
+/* Streaming cursor (ux §6.2) */
+.wb-cursor {
+  animation: wb-blink 1s steps(2, start) infinite;
+}
+
+@keyframes wb-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* Shimmer for status lines and the running pill (ux §2 state motion) */
+.wb-shimmer {
+  animation: wb-shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes wb-shimmer {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Indigo highlight around the preview while a build is running (ux §6.1) */
+.wb-preview-active {
+  animation: wb-preview-pulse 2s ease-in-out infinite;
+}
+
+@keyframes wb-preview-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgb(79 70 229 / 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgb(79 70 229 / 0.1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-cursor,
+  .wb-shimmer,
+  .wb-preview-active,
+  .wb-root .animate-spin {
+    animation: none;
+  }
+}
