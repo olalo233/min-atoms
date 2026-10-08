@@ -56,7 +56,7 @@ class PrivateEnvTest(unittest.TestCase):
         shutil.copytree(VM.parent / 'gateway', self.root / 'infra/gateway')
         for path in ('apps/manager', 'packages', 'templates/fullstack', 'infra/image'):
             (self.root / path).mkdir(parents=True, exist_ok=True)
-        for path in ('package.json', 'bun.lock', 'templates/fullstack/AGENTS.md'):
+        for path in ('.dockerignore', 'package.json', 'bun.lock', 'templates/fullstack/AGENTS.md'):
             (self.root / path).write_text('dummy deployment input\n')
         self.config = self.root / 'private'
         self.config.mkdir(mode=0o700)

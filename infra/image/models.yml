@@ -1,0 +1,18 @@
+providers:
+  ma-gateway:
+    baseUrl: http://ma-gateway:8081__GATEWAY_PATH__
+    api: __OMP_MODEL_API__
+    apiKey: min-atoms-placeholder
+    authHeader: true
+    models:
+      - id: __OMP_MODEL_ID__
+        name: Project model
+        reasoning: false
+        input: [text]
+        cost:
+          input: 0
+          output: 0
+          cacheRead: 0
+          cacheWrite: 0
+        contextWindow: 128000
+        maxTokens: 8192

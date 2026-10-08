@@ -1,0 +1,17 @@
+**
+!infra/
+!infra/image/
+!infra/image/**
+!templates/
+!templates/fullstack/
+!templates/fullstack/**
+
+# Keep local validation output and secrets out of the template build input.
+**/node_modules
+**/dist
+**/.git
+**/.jj
+**/.ma
+**/data
+**/.env
+**/.env.*
