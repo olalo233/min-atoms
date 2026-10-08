@@ -4,7 +4,7 @@ ARG TARGETARCH
 ARG NODE_VERSION=22.18.0
 ARG BUN_VERSION=1.4.2
 ARG OMP_VERSION=18.8.4
-ARG OMP_MODEL_ID=placeholder-model
+ARG OMP_MODEL_ID=deepseek-flash
 ARG OMP_MODEL_API=openai-completions
 
 ENV HOME=/home/app \
