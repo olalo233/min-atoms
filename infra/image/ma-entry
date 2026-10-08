@@ -1,0 +1,44 @@
+#!/bin/sh
+
+set -eu
+
+template=/opt/template
+workspace=/workspace
+log_dir="$workspace/.ma"
+
+if [ -z "$(find "$workspace" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+    cp -a "$template/." "$workspace/"
+    cd "$workspace"
+    git init
+    git config user.name "min-atoms"
+    git config user.email "min-atoms@localhost"
+    git add -A
+    git commit -m "Initial scaffold"
+fi
+
+mkdir -p "$log_dir"
+log_file="$log_dir/dev.log"
+backoff=1
+
+stop_server() {
+    if [ -n "${server_pid:-}" ]; then
+        kill "$server_pid" 2>/dev/null || true
+        wait "$server_pid" 2>/dev/null || true
+    fi
+    exit 0
+}
+
+trap stop_server HUP INT TERM
+
+while :; do
+    (cd "$workspace" && bun run dev) >>"$log_file" 2>&1 &
+    server_pid=$!
+    wait "$server_pid" || true
+    server_pid=
+    printf '%s dev server exited; restarting in %s seconds\n' "$(date -Is)" "$backoff" >>"$log_file"
+    sleep "$backoff"
+    if [ "$backoff" -lt 30 ]; then
+        backoff=$((backoff * 2))
+        [ "$backoff" -le 30 ] || backoff=30
+    fi
+done

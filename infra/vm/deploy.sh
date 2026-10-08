@@ -3,7 +3,7 @@ set -euo pipefail
 # shellcheck source=infra/vm/common.sh
 source "$(dirname "$0")/common.sh"
 parse_dry_run "$@"
-inputs=(apps/manager packages templates/fullstack infra/image infra/gateway infra/vm package.json bun.lock)
+inputs=(.dockerignore apps/manager packages templates/fullstack infra/image infra/gateway infra/vm package.json bun.lock)
 if ! "$DRY_RUN"; then
   require_owned_vm
   for input in "${inputs[@]}"; do [[ -e "$MA_ROOT/$input" ]] || die "Missing deploy input: $input"; done
