@@ -1,0 +1,17 @@
+{
+  "name": "@min-atoms/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "bun test ./src --pass-with-no-tests"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  }
+}
