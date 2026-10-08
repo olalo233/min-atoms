@@ -19,6 +19,7 @@
 *.md
 !README.md
 !templates/fullstack/AGENTS.md
+!templates/fullstack/docs/requirements.md
 
 # Secrets and machine-local configuration.
 .env
