@@ -184,7 +184,11 @@ export async function verifySseToken(token: string, projectId: string, secret: s
     if (fields.p !== projectId || !idSchema.safeParse(fields.p).success) return false;
     const nowSeconds = Math.floor(now / 1000);
     if ((fields.exp as number) <= nowSeconds || (fields.exp as number) > nowSeconds + SSE_TOKEN_TTL_SECONDS) return false;
-    return await crypto.subtle.verify("HMAC", await importHmacKey(secret), signature, encoder.encode(payloadPart));
+    // Copy into a fresh view: with lib.dom in the program, BufferSource requires
+    // an ArrayBuffer-backed view, which is all this ever was.
+    const signatureBytes = new Uint8Array(signature.length);
+    signatureBytes.set(signature);
+    return await crypto.subtle.verify("HMAC", await importHmacKey(secret), signatureBytes, encoder.encode(payloadPart));
   } catch {
     return false;
   }
