@@ -9,10 +9,11 @@ providers:
         name: Project model
         reasoning: false
         input: [text]
+        # USD per million tokens at peak rates; actual off-peak usage is cheaper.
         cost:
-          input: 0
-          output: 0
-          cacheRead: 0
+          input: 0.30
+          output: 1.20
+          cacheRead: 0.006
           cacheWrite: 0
-        contextWindow: 128000
-        maxTokens: 8192
+        contextWindow: 1048576
+        maxTokens: 393216
