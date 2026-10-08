@@ -1,0 +1,15 @@
+[Unit]
+Description=min-atoms Caddy gateway
+Requires=docker.service ma-firewall.service
+After=docker.service ma-firewall.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/min-atoms/env
+ExecStart=/bin/bash /opt/min-atoms/infra/vm/gateway.sh
+ExecStop=/usr/bin/docker stop ma-gateway
+RemainAfterExit=yes
+
+[Install]
+WantedBy=docker.service
