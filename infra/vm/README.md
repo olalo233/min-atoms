@@ -6,10 +6,28 @@ Use Bash, gcloud, jq, curl and the official Node.js `cf` CLI (1.0.0-beta.12).
 If `cf` is shadowed, use `CF_BIN=cloudflare` for the Cloudflare scripts.
 The GCP project, VM, zone and Cloudflare zone are fixed in `common.sh`.
 
+SSH prerequisite: the existing IAP firewall must allow this VM, and the PM must
+authorize the public key for `tmars` on this VM only, with
+`block-project-ssh-keys=true`. The local identity must already exist at
+`~/.ssh/google_compute_engine`; scripts never create keys or manage project or
+instance SSH metadata. All remote commands use the following connection flags
+(`--plain` bypasses SDK key/metadata management):
+
+```sh
+gcloud compute ssh tmars@min-atoms-vm \
+  --project=hy2-seoul-relay-20260728 --zone=asia-northeast1-b \
+  --plain --tunnel-through-iap \
+  --ssh-flag=-i --ssh-flag="$HOME/.ssh/google_compute_engine" \
+  --ssh-flag=-oIdentitiesOnly=yes --ssh-flag=-oBatchMode=yes \
+  --ssh-flag=-oConnectTimeout=60 --ssh-flag=-oStrictHostKeyChecking=accept-new \
+  --ssh-flag=-T --command='true'
+```
+
 First setup:
 
 1. Run `infra/vm/cloudflare.sh`. It creates/reuses the remote `min-atoms` tunnel,
-   verifies ingress and DNS, and saves 30 full preview hostnames in
+   reads ingress first, skips updates when it matches, otherwise updates and
+   verifies readback. It verifies DNS and saves 30 full preview hostnames in
    `~/.config/min-atoms/preview-hosts.txt` (0600). Keep this file private. An
    interrupted run reuses the persisted pool. Existing mismatched DNS records
    cause failure rather than being overwritten. Authenticate/select the intended
@@ -61,6 +79,7 @@ Local checks:
 ```sh
 shellcheck infra/vm/*.sh
 python3 infra/vm/tests/private-env.py
+python3 infra/vm/tests/cloudflare-ingress.py
 infra/vm/up.sh --dry-run
 infra/vm/bootstrap.sh --dry-run
 infra/vm/cloudflare.sh --dry-run
@@ -73,6 +92,7 @@ Real health, preview HTTP/WebSocket, model-key injection, metadata blocking and
 reboot acceptance are performed by the PM on the target VM.
 The credential regression check uses dummy private files, a local gcloud stub
 that captures SSH stdin, and a health-response stub; it never contacts the VM.
+The ingress regression check uses a local cf stub and dummy records only.
 
 References: [cloudflared apt repository](https://pkg.cloudflare.com/),
 [Caddy reverse proxy placeholders and headers](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy).
