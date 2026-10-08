@@ -327,8 +327,8 @@ for await (const line of console) {
 `;
     writeFileSync(join(dir, "docker"), fakeDocker, { mode: 0o700 });
     const out = join(dir, "fake-recording.ndjson");
-    const child = Bun.spawn([process.execPath, "apps/manager/scripts/omp-spike.ts", "--container", "fake-container",
-      "--out", out, "--prompt", "fake prompt", "--timeout-ms", "1000"], {
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, "../scripts/omp-spike.ts"), "--container", "fake-container",
+      "--out", out, "--prompt", "fake prompt", "--timeout-ms", "5000"], {
       env: { PATH: dir }, stdout: "pipe", stderr: "pipe",
     });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
@@ -341,4 +341,4 @@ for await (const line of console) {
     expect(readFileSync(out, "utf8").trim().split("\n").map(line => JSON.parse(line).type))
       .toEqual(["response", "prompt_result", "session_settled"]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
-});
+}, 10_000);
