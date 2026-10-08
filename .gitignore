@@ -18,6 +18,7 @@
 *review-report*
 *.md
 !README.md
+!templates/fullstack/AGENTS.md
 
 # Secrets and machine-local configuration.
 .env
@@ -33,7 +34,7 @@ settings.local.json
 
 # Generated and local files.
 .DS_Store
-/node_modules
+node_modules/
 .next/
 dist/
 build/
@@ -42,4 +43,3 @@ playwright-report/
 test-results/
 *.tsbuildinfo
 .vercel
-.env*

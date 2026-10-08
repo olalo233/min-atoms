@@ -1,2 +1,0 @@
-ALTER TABLE "generation_jobs" DROP CONSTRAINT "generation_jobs_status_check";--> statement-breakpoint
-ALTER TABLE "generation_jobs" ADD CONSTRAINT "generation_jobs_status_check" CHECK ("generation_jobs"."status" in ('queued', 'planning', 'generating', 'validating', 'repairing', 'completed', 'failed', 'cancelled'));
