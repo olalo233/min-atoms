@@ -53,6 +53,12 @@ First setup:
 Bootstrap installs Debian Docker/iptables, cloudflared from its signed official
 apt repository, and Bun 1.4.2 from the official release archive. It installs the
 four systemd units and starts the firewall before gateway and manager.
+It preserves other `/etc/docker/daemon.json` fields and sets exactly
+`"dns": ["8.8.8.8"]`: containers cannot use the host's metadata resolver while
+metadata DROP remains enforced. Changed config restarts active Docker through
+the existing firewall/gateway/manager lifecycle; inactive Docker starts with the
+new config. Matching config is not rewritten and does not restart Docker.
+Dry-run prints this intent without reading or writing daemon config.
 Cloudflared uses `TUNNEL_TOKEN` from the private environment file (the supported
 environment equivalent of `tunnel run --token`). Gateway publishes only
 `127.0.0.1:8080:80`; its model listener at 8081 is accessible on `ma-net` only.
@@ -80,6 +86,7 @@ Local checks:
 shellcheck infra/vm/*.sh
 python3 infra/vm/tests/private-env.py
 python3 infra/vm/tests/cloudflare-ingress.py
+python3 infra/vm/tests/docker-dns.py
 infra/vm/up.sh --dry-run
 infra/vm/bootstrap.sh --dry-run
 infra/vm/cloudflare.sh --dry-run
@@ -93,6 +100,8 @@ reboot acceptance are performed by the PM on the target VM.
 The credential regression check uses dummy private files, a local gcloud stub
 that captures SSH stdin, and a health-response stub; it never contacts the VM.
 The ingress regression check uses a local cf stub and dummy records only.
+The DNS check uses fake host files and command stubs; it never invokes real
+Docker, systemd or cloud commands.
 
 References: [cloudflared apt repository](https://pkg.cloudflare.com/),
 [Caddy reverse proxy placeholders and headers](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy).
