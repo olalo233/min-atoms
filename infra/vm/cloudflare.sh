@@ -11,6 +11,8 @@ if "$DRY_RUN"; then
   print_command "$CF_BIN" tunnels list --name min-atoms --is-deleted=false
   print_command "$CF_BIN" tunnels create --name min-atoms --config-src cloudflare
   print_command "$CF_BIN" tunnels get DUMMY-TUNNEL-ID
+  print_command "$CF_BIN" tunnels config get DUMMY-TUNNEL-ID
+  printf 'If ingress matches: skip update; otherwise update and read back.\n'
   print_command "$CF_BIN" tunnels config update DUMMY-TUNNEL-ID --body "$ingress"
   print_command "$CF_BIN" tunnels config get DUMMY-TUNNEL-ID
   for ((i=0; i<=30; i++)); do
@@ -37,11 +39,12 @@ esac
 tunnel=$("$CF_BIN" tunnels get "$tunnel_id")
 jq -e --arg id "$tunnel_id" '.id == $id and .name == "min-atoms" and .config_src == "cloudflare" and .deleted_at == null' <<< "$tunnel" >/dev/null \
   || die 'Tunnel readback failed or existing tunnel is locally managed.'
-# Replacing the same dedicated configuration is idempotent, including recovery
-# after creation was interrupted before the first configuration was installed.
-"$CF_BIN" tunnels config update "$tunnel_id" --body "$ingress" >/dev/null
 config=$("$CF_BIN" tunnels config get "$tunnel_id")
-jq -e --argjson desired "$ingress" '.config.ingress == $desired.config.ingress' <<< "$config" >/dev/null || die 'Ingress readback differs.'
+if ! jq -e --argjson desired "$ingress" '.config.ingress == $desired.config.ingress' <<< "$config" >/dev/null; then
+  "$CF_BIN" tunnels config update "$tunnel_id" --body "$ingress" >/dev/null
+  config=$("$CF_BIN" tunnels config get "$tunnel_id")
+  jq -e --argjson desired "$ingress" '.config.ingress == $desired.config.ingress' <<< "$config" >/dev/null || die 'Ingress readback differs.'
+fi
 target=$tunnel_id.cfargotunnel.com
 ensure_record() {
   local name=$1 records record_id body readback

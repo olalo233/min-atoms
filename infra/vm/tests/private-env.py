@@ -22,14 +22,24 @@ import base64, json, os, sys
 args = sys.argv[1:]
 assert '--project=hy2-seoul-relay-20260728' in args
 assert '--zone=asia-northeast1-b' in args
-assert 'min-atoms-vm' in args
 if args[:3] == ['compute', 'instances', 'describe']:
+    assert args[3] == 'min-atoms-vm', args
     payload = b''
     print(json.dumps({'name': 'min-atoms-vm', 'labels': {'app': 'min-atoms'},
         'zone': 'zones/asia-northeast1-b', 'machineType': 'types/e2-standard-4',
         'serviceAccounts': []}))
 else:
     assert args[:2] == ['compute', 'ssh'], args
+    assert args[2] == 'tmars@min-atoms-vm', args
+    assert set(args[3:]) == {
+        '--project=hy2-seoul-relay-20260728', '--zone=asia-northeast1-b',
+        '--plain', '--tunnel-through-iap', '--ssh-flag=-i',
+        '--ssh-flag=' + os.path.join(os.environ['HOME'], '.ssh/google_compute_engine'),
+        '--ssh-flag=-oIdentitiesOnly=yes', '--ssh-flag=-oBatchMode=yes',
+        '--ssh-flag=-oConnectTimeout=60',
+        '--ssh-flag=-oStrictHostKeyChecking=accept-new', '--ssh-flag=-T',
+        next(arg for arg in args if arg.startswith('--command=')),
+    }, args
     payload = sys.stdin.buffer.read()
 with open(os.environ['MA_TEST_CAPTURE'], 'a') as capture:
     capture.write(json.dumps({'args': args,
@@ -115,6 +125,21 @@ class PrivateEnvTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr.decode())
                 self.assertEqual(calls, [])
                 self.assertNotIn('/etc/min-atoms/deepseek.key', result.stdout.decode())
+
+    def test_gateway_dry_run_without_home_or_private_inputs(self):
+        # Match systemd: no local-user paths, source hook or model key.
+        for name in ('HOME', 'BASH_ENV', 'MA_CONFIG', 'DEEPSEEK_API_KEY'):
+            self.env.pop(name, None)
+        shutil.rmtree(self.config)
+        result, calls = self.run_script('gateway.sh', '--dry-run')
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertEqual(calls, [])
+        command = next(line for line in result.stdout.decode().splitlines()
+                       if line.startswith('+ docker run '))
+        argv = shlex.split(command[2:])
+        self.assertEqual(argv[argv.index('--publish') + 1], '127.0.0.1:8080:80')
+        self.assertEqual(argv[argv.index('--env') + 1], 'DEEPSEEK_API_KEY')
+        self.assertFalse(self.config.exists())
 
     def test_local_env_cannot_be_a_second_model_key_source(self):
         (self.config / 'env').write_text(LOCAL_ENV + '\nDEEPSEEK_API_KEY=dummy-copy\n')

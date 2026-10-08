@@ -7,7 +7,10 @@ MA_VM=min-atoms-vm
 export MA_DOMAIN=expii.top
 export MA_ROOT
 MA_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-export MA_CONFIG=${HOME}/.config/min-atoms
+# Local PM paths are unused by host services, which may run without HOME.
+if [[ -n "${HOME:-}" ]]; then
+  export MA_CONFIG=${HOME}/.config/min-atoms
+fi
 DRY_RUN=false
 
 die() { printf '%s\n' "$*" >&2; exit 1; }
@@ -16,7 +19,12 @@ run() {
   if "$DRY_RUN"; then print_command "$@"; else "$@"; fi
 }
 remote() {
-  run gcloud compute ssh "$MA_VM" --project="$MA_PROJECT" --zone="$MA_ZONE" \
+  # --plain bypasses SDK key creation and SSH metadata management.
+  run gcloud compute ssh "tmars@$MA_VM" --project="$MA_PROJECT" --zone="$MA_ZONE" \
+    --plain --tunnel-through-iap \
+    --ssh-flag=-i --ssh-flag="${HOME}/.ssh/google_compute_engine" \
+    --ssh-flag=-oIdentitiesOnly=yes --ssh-flag=-oBatchMode=yes \
+    --ssh-flag=-oConnectTimeout=60 --ssh-flag=-oStrictHostKeyChecking=accept-new \
     --ssh-flag=-T --command="$1"
 }
 parse_dry_run() {
