@@ -72,8 +72,10 @@ export class DockerProcess {
   network: string | undefined = "bridge";
   gatewayRunning = true;
   unavailable = false;
+  restartExitCode = 0;
   spawn: Spawn = async argv => {
     this.commands.push([...argv]);
+    if (argv[1] === "restart" && this.restartExitCode !== 0) return { exitCode: this.restartExitCode, stdout: "" };
     if (this.unavailable) return { exitCode: 1, stdout: "" };
     const ok = (stdout = "") => ({ exitCode: 0, stdout });
     if (argv[0] === "iptables") return { exitCode: this.firewall ? 0 : 1, stdout: "" };
@@ -89,7 +91,7 @@ export class DockerProcess {
       const container = this.containers.get(name);
       return container ? ok(JSON.stringify({ ...container, name: `/${name}` })) : { exitCode: 1, stdout: "" };
     }
-    const name = argv[2];
+    const name = argv[1] === "restart" ? argv.at(-1)! : argv[2];
     if (argv[1] === "create") {
       const values = (flag: string) => argv.flatMap((value, index) => value === flag ? [argv[index + 1]] : []);
       const container: FakeContainer = {
@@ -104,7 +106,7 @@ export class DockerProcess {
     }
     const container = this.containers.get(name);
     if (!container) throw new Error(`Unexpected fake process command: ${argv.slice(0, 3).join(" ")}`);
-    if (argv[1] === "start") container.running = true;
+    if (argv[1] === "start" || argv[1] === "restart") container.running = true;
     else if (argv[1] === "stop") container.running = false;
     else if (argv[1] === "rm") this.containers.delete(name);
     else throw new Error("Unexpected process command");

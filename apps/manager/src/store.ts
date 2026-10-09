@@ -1,4 +1,4 @@
-import { appendMessage, projects, runs, runEvents } from "@min-atoms/db";
+import { appendMessage, projects, runs, runEvents, messages, versions, type Run } from "@min-atoms/db";
 import * as schema from "@min-atoms/db/schema";
 import { RunEventSchema, ManagerStreamEventSchema, type RunEvent } from "@min-atoms/protocol";
 import { and, asc, eq, gt, inArray, sql, type ExtractTablesWithRelations } from "drizzle-orm";
@@ -18,6 +18,20 @@ export interface ManagerStore {
   queuedProjects(): Promise<string[]>;
 }
 
+export type QueuedRun = Run & { content: string };
+export type FinishRun = {
+  runId: string; expected: "queued" | "running";
+  status: "succeeded" | "failed" | "cancelled"; content: string; now: Date;
+  version?: { number: number; commitSha: string; summary: string; screenshot: boolean };
+};
+export interface RunStore extends ManagerStore {
+  nextRun(projectId: string): Promise<QueuedRun | undefined>;
+  run(projectId: string, runId: string): Promise<Run | undefined>;
+  claim(projectId: string, runId: string, now: Date): Promise<boolean>;
+  versionState(projectId: string): Promise<{ next: number; current: number | null }>;
+  finish(projectId: string, input: FinishRun): Promise<StoredEvent[]>;
+}
+
 function envelope(row: { id: number; payload: unknown }): StoredEvent {
   return ManagerStreamEventSchema.parse({ id: row.id, event: row.payload });
 }
@@ -26,8 +40,67 @@ function envelope(row: { id: number; payload: unknown }): StoredEvent {
 // credential-free PGlite in tests. It does not create a connection at import time.
 export function createManagerStore<TResult extends PgQueryResultHKT>(
   db: PgDatabase<TResult, typeof schema, ExtractTablesWithRelations<typeof schema>>,
-): ManagerStore {
+): RunStore {
   return {
+    async nextRun(projectId) {
+      const [row] = await db.select({ run: runs, content: messages.content }).from(runs)
+        .innerJoin(messages, eq(runs.userMessageId, messages.id))
+        .where(and(eq(runs.projectId, projectId), eq(runs.status, "queued")))
+        .orderBy(asc(messages.seq)).limit(1);
+      return row ? { ...row.run, content: row.content } : undefined;
+    },
+    async run(projectId, runId) {
+      const [row] = await db.select().from(runs)
+        .where(and(eq(runs.projectId, projectId), eq(runs.id, runId)));
+      return row;
+    },
+    async claim(projectId, runId, now) {
+      const rows = await db.update(runs).set({ status: "running", startedAt: now })
+        .where(and(eq(runs.id, runId), eq(runs.projectId, projectId), eq(runs.status, "queued")))
+        .returning({ id: runs.id });
+      return rows.length === 1;
+    },
+    async versionState(projectId) {
+      const [last] = await db.select({ number: sql<number>`coalesce(max(${versions.number}), 0)`.mapWith(Number) })
+        .from(versions).where(eq(versions.projectId, projectId));
+      const [current] = await db.select({ number: versions.number }).from(projects)
+        .innerJoin(versions, eq(projects.currentVersionId, versions.id)).where(eq(projects.id, projectId));
+      return { next: last.number + 1, current: current?.number ?? null };
+    },
+    async finish(projectId, input) {
+      return db.transaction(async tx => {
+        const [project] = await tx.select({ id: projects.id }).from(projects)
+          .where(eq(projects.id, projectId)).for("update");
+        if (!project) throw new ManagerError(404, "Project not found");
+        // The queued cancellation and claim compete on the same predicate.
+        const [run] = await tx.update(runs).set({ status: input.status,
+          error: input.status === "failed" ? input.content : null, finishedAt: input.now })
+          .where(and(eq(runs.id, input.runId), eq(runs.projectId, projectId), eq(runs.status, input.expected)))
+          .returning();
+        if (!run) return [];
+        let version: typeof versions.$inferSelect | undefined;
+        if (input.version) {
+          if (input.status !== "succeeded" || run.mode !== "build") throw new ManagerError(409, "Invalid terminal version");
+          [version] = await tx.insert(versions).values({ ...input.version, projectId, runId: run.id }).returning();
+          await tx.update(projects).set({ currentVersionId: version.id, updatedAt: input.now }).where(eq(projects.id, projectId));
+        }
+        await appendMessage(tx, projectId, { role: "assistant", mode: run.mode, content: input.content,
+          runId: run.id, versionId: version?.id ?? null });
+        const [last] = await tx.select({ seq: sql<number>`coalesce(max(${runEvents.seq}), 0)`.mapWith(Number) })
+          .from(runEvents).where(eq(runEvents.runId, run.id));
+        let seq = last.seq;
+        const base = { runId: run.id, at: input.now.toISOString() };
+        const events: RunEvent[] = [];
+        if (version) events.push({ ...base, seq: ++seq, kind: "version", versionId: version.id,
+          number: version.number, commitSha: version.commitSha, summary: version.summary });
+        if (input.status === "failed") events.push({ ...base, seq: ++seq, kind: "error", message: input.content });
+        events.push({ ...base, seq: ++seq, kind: "status", status: input.status,
+          ...(input.status === "succeeded" ? {} : { detail: input.content }) });
+        const rows = await tx.insert(runEvents).values(events.map(event => ({ projectId,
+          runId: run.id, seq: event.seq, kind: event.kind, payload: RunEventSchema.parse(event) }))).returning();
+        return rows.map(envelope).sort((a, b) => a.id - b.id);
+      });
+    },
     async project(id) {
       const [row] = await db.select({ id: projects.id, previewLabel: projects.previewLabel })
         .from(projects).where(eq(projects.id, id));

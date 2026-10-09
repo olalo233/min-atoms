@@ -1,6 +1,7 @@
 import { createDatabase } from "@min-atoms/db";
 import { createManager, type KickQueuedProject } from "./manager";
 import { createManagerStore } from "./store";
+import { installRunDriver } from "./run-driver";
 
 export function readManagerConfig(env: Record<string, string | undefined>) {
   for (const key of ["DATABASE_URL", "MA_SHARED_SECRET", "WEB_ORIGIN"]) {
@@ -24,17 +25,16 @@ export type QueueDriverFactory = (manager: ReturnType<typeof createManager>) => 
 
 // Called by the entrypoint, or by T12 with a driver bound to these exact
 // runtime/event/store instances. Imports are inert.
-export async function startManager(config: ReturnType<typeof readManagerConfig>, installQueue?: QueueDriverFactory) {
+export async function startManager(config: ReturnType<typeof readManagerConfig>, installQueue: QueueDriverFactory = installRunDriver) {
   const connection = createDatabase(config.databaseUrl);
   try {
     const manager = createManager({ ...config, store: createManagerStore(connection.db) });
-    const recovery = await manager.initialize(installQueue?.(manager));
+    const recovery = await manager.initialize(installQueue(manager));
     return { ...manager, recovery, close: connection.close };
   } catch (error) { await connection.close(); throw error; }
 }
 
 if (import.meta.main) {
   const manager = await startManager(readManagerConfig(process.env));
-  if (manager.recovery.queuedProjects.length) console.info("Queued runs remain pending until the T12 driver is installed.");
   Bun.serve({ hostname: "127.0.0.1", port: 8090, idleTimeout: 0, fetch: manager.app.fetch });
 }
