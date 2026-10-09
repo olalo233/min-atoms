@@ -2,6 +2,7 @@ import { createDatabase } from "@min-atoms/db";
 import { createManager, type KickQueuedProject } from "./manager";
 import { createManagerStore } from "./store";
 import { installRunDriver } from "./run-driver";
+import { createRestoreStore, installRestore } from "./restore";
 
 export function readManagerConfig(env: Record<string, string | undefined>) {
   for (const key of ["DATABASE_URL", "MA_SHARED_SECRET", "WEB_ORIGIN"]) {
@@ -29,6 +30,7 @@ export async function startManager(config: ReturnType<typeof readManagerConfig>,
   const connection = createDatabase(config.databaseUrl);
   try {
     const manager = createManager({ ...config, store: createManagerStore(connection.db) });
+    installRestore(manager, { store: createRestoreStore(connection.db) });
     const recovery = await manager.initialize(installQueue(manager));
     return { ...manager, recovery, close: connection.close };
   } catch (error) { await connection.close(); throw error; }
