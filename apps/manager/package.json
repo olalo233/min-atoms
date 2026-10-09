@@ -13,6 +13,10 @@
   "dependencies": {
     "@min-atoms/db": "workspace:*",
     "@min-atoms/protocol": "workspace:*",
+    "drizzle-orm": "0.45.2",
     "hono": "4.13.13"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8"
   }
 }
