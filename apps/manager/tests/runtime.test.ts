@@ -106,6 +106,37 @@ test("stopped owned container restarts without recreating; unrelated same-name c
   } finally { await h.cleanup(); }
 });
 
+test("cancellation restart validates project ownership, preserves mounts/data and waits for preview", async () => {
+  const h = await harness();
+  try {
+    const project = h.store.add(1);
+    await h.runtime.ensure(project.id, project.previewLabel);
+    for (const name of ["workspace", "data", "state"]) {
+      await writeFile(join(h.root, project.id, name, "retained"), name);
+    }
+    const container = h.docker.containers.get(project.previewLabel)!;
+    const mounts = structuredClone(container.mounts);
+    h.docker.commands.length = 0;
+    expect(await h.runtime.restart(project.id, project.previewLabel)).toBe(true);
+    expect(h.docker.commands.filter(argv => argv[1] === "restart")).toEqual([["docker", "restart", "-t", "2", project.previewLabel]]);
+    expect(h.docker.commands.filter(argv => ["create", "start", "stop", "rm"].includes(argv[1]))).toEqual([]);
+    expect(container.mounts).toEqual(mounts);
+    expect(h.probes).toHaveLength(2);
+    for (const name of ["workspace", "data", "state"]) expect(await readFile(join(h.root, project.id, name, "retained"), "utf8")).toBe(name);
+    for (const mismatch of ["project", "mount", "label", "firewall"]) {
+      container.labels["min-atoms.project-id"] = mismatch === "project" ? id(2) : project.id;
+      container.labels["min-atoms.preview-label"] = mismatch === "label" ? label(2) : project.previewLabel;
+      container.mounts = mismatch === "mount" ? [] : mounts;
+      h.docker.firewall = mismatch !== "firewall";
+      h.docker.commands.length = 0;
+      expect(await h.runtime.restart(project.id, project.previewLabel)).toBe(false);
+      expect(h.docker.commands.some(argv => argv[1] === "restart")).toBe(false);
+    }
+    expect(await h.runtime.restart(id(2), label(2))).toBe(false);
+    expect(await h.runtime.restart(project.id, label(2))).toBe(false);
+  } finally { await h.cleanup(); }
+});
+
 test("readiness failure returns 504 at 60 seconds with bounded probes", async () => {
   const h = await harness();
   try {

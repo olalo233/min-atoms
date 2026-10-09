@@ -1,5 +1,5 @@
 import type { RunEvent } from "@min-atoms/protocol";
-import type { ManagerStore, StoredEvent } from "./store";
+import type { FinishRun, ManagerStore, RunStore, StoredEvent } from "./store";
 import { serialLane } from "./serial";
 
 type Listener = (record: StoredEvent) => void;
@@ -35,6 +35,16 @@ export class DurableEvents {
   append(projectId: string, events: RunEvent[]): Promise<StoredEvent[]> {
     return this.write(async () => {
       const records = await this.store.appendEvents(projectId, events);
+      this.publish(projectId, records);
+      return records;
+    });
+  }
+
+  // Terminal data and events commit together, in the same lane as batches.
+  finish(projectId: string, input: FinishRun): Promise<StoredEvent[]> {
+    return this.write(async () => {
+      const store = this.store as RunStore;
+      const records = await store.finish(projectId, input);
       this.publish(projectId, records);
       return records;
     });

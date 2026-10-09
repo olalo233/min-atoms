@@ -173,18 +173,38 @@ export class ProjectRuntime {
         }
         container = await this.inspect(label);
       }
-      if (!container.running || !this.owns(container, project) || isIP(container.ip) !== 4) {
-        throw new ManagerError(503, "Project container has no usable preview address");
-      }
-      this.lastUsed.set(label, this.clock.now());
-      const deadline = this.clock.now() + 60_000;
-      while (this.clock.now() < deadline) {
-        if (await this.ready(container.ip, Math.min(1000, deadline - this.clock.now()))) return;
-        const remaining = deadline - this.clock.now();
-        if (remaining > 0) await this.clock.sleep(Math.min(500, remaining));
-      }
-      throw new ManagerError(504, "Preview readiness timed out after 60 seconds");
+      await this.waitReady(container, project);
     });
+  }
+
+  // Cancellation restarts only the validated project container. Volumes and
+  // resources remain as configured by ensure; no workspace preparation here.
+  restart(id: string, label: string): Promise<boolean> {
+    return this.mutate(async () => {
+      try {
+        const project = await this.project(id, label);
+        const container = await this.inspect(label);
+        if (!this.owns(container, project)) return false;
+        await this.firewall();
+        await this.command(["docker", "restart", "-t", "2", label]);
+        await this.waitReady(await this.inspect(label), project);
+        return true;
+      } catch { return false; }
+    });
+  }
+
+  private async waitReady(container: Container, project: RuntimeProject): Promise<void> {
+    if (!container.running || !this.owns(container, project) || isIP(container.ip) !== 4) {
+      throw new ManagerError(503, "Project container has no usable preview address");
+    }
+    this.lastUsed.set(project.previewLabel, this.clock.now());
+    const deadline = this.clock.now() + 60_000;
+    while (this.clock.now() < deadline) {
+      if (await this.ready(container.ip, Math.min(1000, deadline - this.clock.now()))) return;
+      const remaining = deadline - this.clock.now();
+      if (remaining > 0) await this.clock.sleep(Math.min(500, remaining));
+    }
+    throw new ManagerError(504, "Preview readiness timed out after 60 seconds");
   }
 
   remove(id: string): Promise<void> {

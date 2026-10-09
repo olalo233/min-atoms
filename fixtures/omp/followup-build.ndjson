@@ -1,0 +1,14 @@
+{"type":"ready","protocolVersion":1}
+{"id":"spike-open","type":"response","command":"open_session","success":true,"data":{"cancelled":false}}
+{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"[WITHHELD_INCREMENTAL_CONTENT]"}}
+{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"[WITHHELD_INCREMENTAL_CONTENT]"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"[WITHHELD_INCREMENTAL_CONTENT]"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"[WITHHELD_INCREMENTAL_CONTENT]"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","delta":"[WITHHELD_INCREMENTAL_CONTENT]"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","delta":"[WITHHELD_INCREMENTAL_CONTENT]"}}
+{"type":"tool_execution_start","toolCallId":"call_00_ET_o63VTgl6V6D3yaN6HfJl6766","toolName":"write","args":{"path":"src/App.tsx"}}
+{"type":"tool_execution_end","toolCallId":"call_00_ET_o63VTgl6V6D3yaN6HfJl6766","result":{"content":[{"type":"text","text":"Successfully wrote 2039 bytes to src/App.tsx"}]},"isError":false}
+{"type":"tool_execution_start","toolCallId":"call_00_Z3Nm24CJnYZJD2P039sJ5320","toolName":"bash","args":{"command":"bun -e 'import { Database } from \"bun:sqlite\"; const db = new Database(\"/data/app.db\"); db.run(\"DELETE FROM scores\"); console.log(db.query(\"select count(*) as c from scores\").get());'"}}
+{"type":"tool_execution_end","toolCallId":"call_00_Z3Nm24CJnYZJD2P039sJ5320","result":{"content":[{"type":"text","text":"{\n  c: 0,\n}\n\n\nWall time: 0.08 seconds"}]},"isError":false}
+{"type":"prompt_result","id":"spike-prompt","status":"completed","sessionSettled":true}
+{"type":"session_settled"}
