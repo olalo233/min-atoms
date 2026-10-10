@@ -3,9 +3,24 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Visual direction (T34a): "the workbench". A quiet zinc bench with one
+ * accent (indigo). The memorable pieces are the build rail in the run
+ * block and the faint cutting-mat grid the live preview sits on. Code-ish
+ * things (paths, commands, version numbers, the wordmark) use the mono face.
+ */
 @theme {
-  --font-sans: "PingFang SC", "Noto Sans SC", system-ui, -apple-system,
-    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Hiragino Sans GB",
+    "Microsoft YaHei", system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --shadow-hairline: 0 0 0 1px rgb(24 24 27 / 0.06);
+  --shadow-card: 0 0 0 1px rgb(24 24 27 / 0.06), 0 1px 2px rgb(24 24 27 / 0.04), 0 2px 6px -2px rgb(24 24 27 / 0.05);
+  --shadow-raised: 0 0 0 1px rgb(24 24 27 / 0.06), 0 1px 2px rgb(24 24 27 / 0.05),
+    0 12px 28px -12px rgb(24 24 27 / 0.18);
+  --shadow-float: 0 0 0 1px rgb(24 24 27 / 0.06), 0 2px 4px rgb(24 24 27 / 0.04),
+    0 18px 40px -16px rgb(24 24 27 / 0.28);
+  --shadow-focus: 0 0 0 1px rgb(79 70 229 / 0.7), 0 0 0 4px rgb(79 70 229 / 0.14);
 }
 
 @theme inline {
@@ -53,15 +68,30 @@
   --border: var(--color-zinc-200);
   --input: var(--color-zinc-200);
   --ring: var(--color-indigo-600);
+  color-scheme: light;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
   body {
     @apply bg-background text-foreground font-sans text-sm antialiased;
     line-height: 1.6;
+    font-feature-settings: "kern";
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: rgb(79 70 229 / 0.18);
+  }
+  /* Visible keyboard focus everywhere; mouse clicks stay clean. */
+  :where(a, button, [role="tab"], [role="menuitem"], summary, input, textarea, select):focus-visible {
+    outline: 2px solid var(--color-indigo-600);
+    outline-offset: 2px;
   }
 }
 
@@ -77,10 +107,89 @@
   padding: 0.6rem 1rem;
   font-weight: 600;
   text-decoration: none;
+  transition: transform 150ms ease-out;
 }
 
 .skip-link:focus {
   transform: translateY(0);
+}
+
+@layer components {
+  /* The workbench cutting mat: a faint two-scale grid the live app sits on. */
+  .bench-mat {
+    background-color: var(--color-zinc-100);
+    background-image:
+      linear-gradient(rgb(24 24 27 / 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(24 24 27 / 0.045) 1px, transparent 1px),
+      linear-gradient(rgb(24 24 27 / 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(24 24 27 / 0.025) 1px, transparent 1px);
+    background-size:
+      48px 48px,
+      48px 48px,
+      12px 12px,
+      12px 12px;
+    background-position: -1px -1px;
+  }
+
+  /* Hero variant: the same mat, fading out from the top centre. */
+  .bench-mat-hero {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgb(24 24 27 / 0.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(24 24 27 / 0.07) 1px, transparent 1px),
+      linear-gradient(rgb(24 24 27 / 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(24 24 27 / 0.035) 1px, transparent 1px);
+    background-size:
+      48px 48px,
+      48px 48px,
+      12px 12px,
+      12px 12px;
+    background-position: center -1px;
+    -webkit-mask-image: radial-gradient(ellipse 60% 70% at 50% 30%, #000 0%, rgb(0 0 0 / 0.5) 45%, transparent 80%);
+    mask-image: radial-gradient(ellipse 60% 70% at 50% 30%, #000 0%, rgb(0 0 0 / 0.5) 45%, transparent 80%);
+  }
+
+  /* Press feedback within one frame of the click (ux §13: <100ms). */
+  .press {
+    transition-property: transform, background-color, border-color, color, box-shadow, opacity;
+    transition-duration: 120ms;
+    transition-timing-function: ease-out;
+  }
+  .press:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+
+  /* Same grid without the fade, for small surfaces (project thumbnails). */
+  .mat-texture {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgb(24 24 27 / 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(24 24 27 / 0.05) 1px, transparent 1px);
+    background-size: 16px 16px;
+    background-position: center center;
+  }
+
+  /* Breathing dot for "live" status pills (构建中 / 正在构建). */
+  .live-dot {
+    animation: live-dot 1.6s ease-in-out infinite;
+  }
+
+  @keyframes live-dot {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.4;
+      transform: scale(0.75);
+    }
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -91,5 +200,11 @@
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+  }
+  .press:active:not(:disabled) {
+    transform: none;
+  }
+  .live-dot {
+    animation: none;
   }
 }

@@ -63,7 +63,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
       nodes.push(
         <code
           key={`${keyPrefix}-c${i}`}
-          className="rounded border border-zinc-200 bg-zinc-100 px-1 py-0.5 font-mono text-[0.85em] break-all"
+          className="rounded-md bg-zinc-100 px-1.5 py-px font-mono text-[0.84em] text-zinc-800 ring-1 ring-zinc-950/[0.06] [overflow-wrap:anywhere]"
         >
           {segment.slice(1, -1)}
         </code>,
@@ -73,7 +73,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
     segment.split(/(\*\*[^*\n]+\*\*)/g).forEach((part, j) => {
       if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) {
         nodes.push(
-          <strong key={`${keyPrefix}-b${i}-${j}`} className="font-semibold">
+          <strong key={`${keyPrefix}-b${i}-${j}`} className="font-semibold text-zinc-900">
             {part.slice(2, -2)}
           </strong>,
         );
@@ -85,27 +85,41 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
   return nodes;
 }
 
+const Cursor = () => <span aria-hidden="true" className="wb-cursor" />;
+
 export function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
   const blocks = useMemo(() => parseBlocks(text), [text]);
   if (blocks.length === 0 && !streaming) return null;
+  const lastIndex = blocks.length - 1;
+  // The streaming cursor trails the last word; after a code block it gets its own line.
+  const inlineCursor = streaming && lastIndex >= 0 && blocks[lastIndex].type !== "code";
   return (
-    <div className="space-y-2 text-[15px] leading-[1.6] text-zinc-800">
+    <div className="min-w-0 space-y-2.5 text-[15px] leading-[1.65] [overflow-wrap:anywhere] text-zinc-800">
       {blocks.map((block, index) => {
+        const cursorHere = inlineCursor && index === lastIndex;
         if (block.type === "code") {
           return (
-            <pre key={index} className="overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-50 p-3 font-mono text-xs leading-relaxed text-zinc-700">
+            <pre
+              key={index}
+              className="max-w-full overflow-x-auto rounded-xl bg-zinc-50 px-3.5 py-3 font-mono text-[12.5px] leading-relaxed text-zinc-700 ring-1 ring-zinc-950/[0.06] [overflow-wrap:normal]"
+            >
               <code>{block.content}</code>
             </pre>
           );
         }
         if (block.type === "list") {
-          const items = block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item, `${index}-${itemIndex}`)}</li>);
+          const items = block.items.map((item, itemIndex) => (
+            <li key={itemIndex}>
+              {renderInline(item, `${index}-${itemIndex}`)}
+              {cursorHere && itemIndex === block.items.length - 1 && <Cursor />}
+            </li>
+          ));
           return block.ordered ? (
-            <ol key={index} className="list-decimal space-y-1 pl-5">
+            <ol key={index} className="list-decimal space-y-1 pl-5 marker:text-zinc-400">
               {items}
             </ol>
           ) : (
-            <ul key={index} className="list-disc space-y-1 pl-5">
+            <ul key={index} className="list-disc space-y-1 pl-5 marker:text-zinc-300">
               {items}
             </ul>
           );
@@ -118,10 +132,15 @@ export function Markdown({ text, streaming = false }: { text: string; streaming?
                 {renderInline(line, `${index}-${lineIndex}`)}
               </span>
             ))}
+            {cursorHere && <Cursor />}
           </p>
         );
       })}
-      {streaming && <span className="wb-cursor text-indigo-600">▍</span>}
+      {streaming && !inlineCursor && (
+        <div>
+          <Cursor />
+        </div>
+      )}
     </div>
   );
 }

@@ -100,6 +100,75 @@ const versionOne = (projectId: string): VersionDTO => ({
   createdAt: at(10_000),
 });
 
+/**
+ * A richer build for reviewing the run block: a dozen tool steps (one failed
+ * check that gets repaired), streamed text, then verify → commit → version.
+ * `build` replays it live; `building` freezes it mid-run on a running step.
+ */
+const RUN_BUILD = "88888888-8888-4888-8888-888888888888";
+const VERSION_BUILD = "99999999-9999-4999-8999-999999999999";
+
+function buildRunEvents(): RunEvent[] {
+  const events: RunEvent[] = [];
+  let seq = 0;
+  let clock = 0;
+  const push = (event: DistributiveOmit<RunEvent, "runId" | "seq" | "at">, gapMs = 420) => {
+    clock += gapMs;
+    seq += 1;
+    events.push({ ...event, runId: RUN_BUILD, seq, at: at(clock) } as RunEvent);
+  };
+  let call = 0;
+  const tool = (name: string, title: string, end: { ok?: boolean; summary?: string } = {}) => {
+    call += 1;
+    const toolCallId = `build-${call}`;
+    push({ kind: "tool", phase: "start", toolCallId, name, title });
+    push({ kind: "tool", phase: "end", toolCallId, name, title, ok: end.ok ?? true, summary: end.summary }, 520);
+  };
+  const say = (text: string) => {
+    for (const chunk of text.match(/[\s\S]{1,14}/g) ?? []) push({ kind: "text", delta: chunk }, 160);
+  };
+
+  push({ kind: "status", status: "queued" }, 0);
+  push({ kind: "status", status: "starting", detail: "准备环境…" });
+  push({ kind: "thinking", delta: "Plan the recipe app." }, 600);
+  push({ kind: "status", status: "running" });
+  say("好的，我来搭一个食谱收藏应用，先看看现在的项目结构。\n\n");
+  tool("read", "读取 src/App.tsx", { summary: "脚手架占位页：居中的 Atom 图标和“应用正在搭建中…”" });
+  tool("glob", "查找文件 \"src/**/*.tsx\"", { summary: "src/App.tsx\nsrc/main.tsx\nsrc/components/ui/button.tsx\nsrc/components/ui/card.tsx" });
+  tool("write", "写入 docs/requirements.md", { summary: "记录需求：搜索食谱、收藏、收藏持久化" });
+  tool("edit", "编辑 src/db/schema.ts", { summary: "新增 recipes 表：title、tag、minutes、favorite" });
+  tool("bash", "运行 bun run db:migrate", { summary: "Applied 1 migration: 0001_recipes" });
+  tool("write", "写入 src/server/recipes.ts", { summary: "GET /api/recipes?q=… 和 POST /api/recipes/:id/favorite" });
+  tool("write", "写入 src/components/recipe-card.tsx");
+  tool("edit", "编辑 src/App.tsx", { summary: "搜索框 + 食谱列表 + 收藏按钮" });
+  tool("bash", "运行 bun run check", {
+    ok: false,
+    summary: "src/components/recipe-card.tsx(18,5): error TS2322:\n  Type 'string' is not assignable to type 'number'.",
+  });
+  tool("edit", "编辑 src/components/recipe-card.tsx", { summary: "minutes 改为 number，显示时再格式化" });
+  // `building` freezes here: the final check is in progress.
+  call += 1;
+  push({ kind: "tool", phase: "start", toolCallId: `build-${call}`, name: "bash", title: "运行 bun run check" });
+  push({ kind: "tool", phase: "end", toolCallId: `build-${call}`, name: "bash", title: "运行 bun run check", ok: true, summary: "tsc: 0 errors\nvite build: ok" }, 1200);
+  say(
+    "食谱应用做好了：\n\n- 顶部可以**按名称搜索**食谱\n- 每张卡片都能收藏，收藏保存在数据库里\n- 刷新页面后收藏不会丢\n\n右边可以直接试用，想加分类筛选也可以继续告诉我。",
+  );
+  push({ kind: "status", status: "verifying", detail: "正在检查…" }, 500);
+  push({ kind: "status", status: "committing", detail: "正在保存版本…" }, 900);
+  push(
+    { kind: "version", versionId: VERSION_BUILD, number: 1, commitSha: "8f3c2a1d9e7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a", summary: "食谱列表、搜索与收藏" },
+    600,
+  );
+  push({ kind: "status", status: "succeeded" }, 300);
+  return events;
+}
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+const BUILD_EVENTS = buildRunEvents();
+/** Index of the last event delivered in the frozen `building` scenario. */
+const BUILDING_CUTOFF = BUILD_EVENTS.findIndex((event) => event.kind === "tool" && event.toolCallId === "build-11");
+
 interface ScenarioData {
   detail: ProjectDetail;
   /** Events replayed over the mock stream after subscription. */
@@ -285,6 +354,80 @@ function buildScenario(projectId: string, scenario: string): ScenarioData {
           versions,
           lastEventId: 200,
           updatedAt: at(300_000 + 12 * 120_000),
+        },
+        stream: [],
+        vmUp: true,
+      };
+    }
+    case "build":
+      return {
+        detail: {
+          ...base,
+          currentVersionId: null,
+          messages: [m1],
+          runs: [runDto(RUN_BUILD, projectId, m1, "queued", at(0))],
+          versions: [],
+          lastEventId: 0,
+        },
+        stream: BUILD_EVENTS,
+        vmUp: true,
+      };
+    case "building": {
+      const delivered = BUILD_EVENTS.slice(0, BUILDING_CUTOFF + 1);
+      return {
+        detail: {
+          ...base,
+          currentVersionId: null,
+          messages: [m1],
+          runs: [runDto(RUN_BUILD, projectId, m1, "running", at(0), delivered)],
+          versions: [],
+          lastEventId: delivered.length,
+        },
+        stream: [],
+        vmUp: true,
+      };
+    }
+    case "stress": {
+      // Layout stress test: long names, unbroken URLs and paths, long errors.
+      const longUrl = "https://example.com/" + "very-long-path-segment-".repeat(8) + "end";
+      const u1 = userMessage(1, `请参考这个页面做：${longUrl}\n另外 Supercalifragilisticexpialidocious_identifier_without_spaces_at_all 也要支持。`, at(0));
+      const u2 = userMessage(3, "讨论一下：数据要不要分页？", at(60_000), "chat");
+      const rid = runId(90);
+      const longPath = "src/components/" + "deeply-nested-folder/".repeat(6) + "recipe-card-with-a-long-name.tsx";
+      const version: VersionDTO = {
+        id: versionId(90),
+        projectId,
+        number: 12,
+        commitSha: "abcdef0123456789abcdef0123456789abcdef01",
+        summary: "把首页改成两栏布局并加入按分类、按时长、按收藏状态组合筛选，同时保留搜索",
+        runId: rid,
+        screenshot: false,
+        createdAt: at(30_000),
+      };
+      const events: RunEvent[] = [
+        { runId: rid, seq: 1, at: at(1_000), kind: "tool", phase: "start", toolCallId: "s-1", name: "edit", title: `编辑 ${longPath}` },
+        { runId: rid, seq: 2, at: at(2_000), kind: "tool", phase: "end", toolCallId: "s-1", name: "edit", title: `编辑 ${longPath}`, ok: true, summary: longUrl },
+        { runId: rid, seq: 3, at: at(3_000), kind: "tool", phase: "start", toolCallId: "s-2", name: "bash", title: "运行 bun run check && bun run lint && bun run test --reporter=verbose" },
+        { runId: rid, seq: 4, at: at(4_000), kind: "tool", phase: "end", toolCallId: "s-2", name: "bash", title: "运行 bun run check && bun run lint && bun run test --reporter=verbose", ok: true },
+        { runId: rid, seq: 5, at: at(30_000), kind: "version", versionId: version.id, number: version.number, commitSha: version.commitSha, summary: version.summary },
+      ];
+      const failedRun = runId(91);
+      const u3 = userMessage(5, "再试一次。", at(90_000));
+      return {
+        detail: {
+          ...base,
+          name: "一个名字特别特别长的项目用来测试标题在窄屏下会不会把菜单按钮挤出去",
+          currentVersionId: version.id,
+          messages: [u1, assistantMessage(2, `已按照 ${longUrl} 的结构完成。\n\n\`${longPath}\``, at(31_000), rid), u2, assistantMessage(4, "建议先不分页，数据量小于 200 条时一次加载更快。", at(61_000), runId(92)), u3],
+          runs: [
+            runDto(rid, projectId, u1, "succeeded", at(0), events),
+            runDto(runId(92), projectId, u2, "succeeded", at(60_000), [], null, "chat"),
+            runDto(failedRun, projectId, u3, "failed", at(90_000), [
+              { runId: failedRun, seq: 1, at: at(91_000), kind: "error", message: `Error: ENOENT ${longPath}\n    at Object.openSync (node:fs:573:18)\n    at ${longUrl}` },
+            ], `检查未通过：${longPath} 第 18 行类型不匹配`),
+          ],
+          versions: [version],
+          lastEventId: 50,
         },
         stream: [],
         vmUp: true,

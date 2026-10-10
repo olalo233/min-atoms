@@ -2,10 +2,13 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { CircleAlert, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+
+const FIELD_CLASS =
+  "h-11 rounded-xl border-zinc-200 bg-zinc-50/70 px-3.5 text-base shadow-none transition-[background-color,border-color,box-shadow] duration-150 hover:border-zinc-300 focus-visible:border-indigo-500 focus-visible:bg-white focus-visible:ring-4 focus-visible:ring-indigo-500/15 md:text-[15px]";
 
 export function LoginForm() {
   const router = useRouter();
@@ -29,11 +32,7 @@ export function LoginForm() {
 
       if (!response.ok) {
         // 失败时保留用户名，方便演示者直接重试。
-        setError(
-          response.status === 401
-            ? "用户名或密码错误"
-            : "登录失败，请稍后重试",
-        );
+        setError(response.status === 401 ? "用户名或密码错误" : "登录失败，请稍后重试");
         return;
       }
 
@@ -48,23 +47,18 @@ export function LoginForm() {
 
   return (
     <form
-      className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm"
+      className="rounded-2xl bg-white p-6 shadow-[var(--shadow-raised)] sm:p-7"
       onSubmit={handleSubmit}
     >
-      {error ? (
-        <p className="mb-4 text-sm text-red-600" role="alert">
-          {error}
-        </p>
-      ) : null}
       <div className="space-y-4">
         <div className="space-y-1.5">
-          <label className="text-sm font-medium text-zinc-900" htmlFor="username">
+          <label className="text-[13px] font-medium text-zinc-700" htmlFor="username">
             用户名
           </label>
           <Input
             autoComplete="username"
             autoFocus
-            className="h-11 rounded-2xl"
+            className={FIELD_CLASS}
             id="username"
             name="username"
             onChange={(event) => setUsername(event.target.value)}
@@ -73,12 +67,12 @@ export function LoginForm() {
           />
         </div>
         <div className="space-y-1.5">
-          <label className="text-sm font-medium text-zinc-900" htmlFor="password">
+          <label className="text-[13px] font-medium text-zinc-700" htmlFor="password">
             密码
           </label>
           <Input
             autoComplete="current-password"
-            className="h-11 rounded-2xl"
+            className={FIELD_CLASS}
             id="password"
             name="password"
             onChange={(event) => setPassword(event.target.value)}
@@ -88,9 +82,19 @@ export function LoginForm() {
           />
         </div>
       </div>
+      {/* ux §4：失败时在按钮上方显示，不清空用户名。 */}
+      {error ? (
+        <p
+          className="mt-5 flex items-center gap-2 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-600/10 ring-inset"
+          role="alert"
+        >
+          <CircleAlert aria-hidden="true" className="size-4 shrink-0 text-red-600" />
+          {error}
+        </p>
+      ) : null}
       <Button
         aria-busy={isSubmitting}
-        className="mt-6 h-11 w-full rounded-xl font-semibold"
+        className="mt-5 h-11 w-full rounded-xl text-[15px] font-semibold"
         disabled={isSubmitting}
         type="submit"
       >
@@ -103,9 +107,6 @@ export function LoginForm() {
           "登录"
         )}
       </Button>
-      <p className="mt-4 text-center text-xs text-zinc-400">
-        演示账号见邀请信息
-      </p>
     </form>
   );
 }
