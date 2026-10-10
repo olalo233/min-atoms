@@ -15,32 +15,16 @@ import {
   nextVersionNumber,
   type RunViewData,
 } from "@/lib/client/store";
-import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 import { ConversationPane } from "./conversation-pane";
 import { PreviewPane } from "./preview-pane";
 import { RestoreDialog, type RestoreTarget } from "./restore-dialog";
+import { WorkbenchSkeleton } from "./workbench-skeleton";
 
 // Mock gates require development AND the flag (T15 convention): production
 // builds always use the real API and real authentication.
 const MOCK_ENABLED = process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_MOCK_STREAM === "1";
-
-export function WorkbenchSkeleton() {
-  return (
-    <div className="wb-root flex h-dvh overflow-hidden bg-zinc-100">
-      <div className="hidden w-[35%] min-w-[380px] flex-col gap-4 border-r border-zinc-200 bg-zinc-50 p-4 lg:flex">
-        <Skeleton className="h-8 w-1/2 rounded-xl" />
-        <Skeleton className="h-16 w-3/4 self-end rounded-2xl" />
-        <Skeleton className="h-40 w-full rounded-2xl" />
-        <Skeleton className="h-24 w-full rounded-2xl" />
-      </div>
-      <div className="flex-1 p-3">
-        <Skeleton className="h-full w-full rounded-2xl" />
-      </div>
-    </div>
-  );
-}
 
 export function WorkbenchScreen({ projectId }: { projectId: string }) {
   const searchParams = useSearchParams();

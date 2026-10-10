@@ -14,6 +14,7 @@ export function Composer({
   error,
   isSubmitting,
   onChange,
+  onFocus,
   onSubmit,
   textareaRef,
   value,
@@ -21,6 +22,7 @@ export function Composer({
   error: string | null;
   isSubmitting: boolean;
   onChange: (value: string) => void;
+  onFocus?: () => void;
   onSubmit: (value: string) => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   value: string;
@@ -57,6 +59,7 @@ export function Composer({
           aria-label="描述你想做的应用"
           className="block w-full resize-none rounded-t-2xl bg-transparent px-4 pt-4 text-[15px] leading-[1.6] text-zinc-900 outline-none placeholder:text-zinc-400"
           onChange={(event) => onChange(event.target.value)}
+          onFocus={onFocus}
           onKeyDown={handleKeyDown}
           placeholder="例如：做一个记账本，按月统计支出…"
           ref={textareaRef}

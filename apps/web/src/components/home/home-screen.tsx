@@ -14,7 +14,12 @@ import {
 } from "@/components/home/mock-projects";
 import { ProjectCard } from "@/components/home/project-card";
 import { AppHeader } from "@/components/shell/app-header";
+import { WorkbenchSkeleton } from "@/components/workbench/workbench-skeleton";
 import { Skeleton } from "@/components/ui/skeleton";
+
+// ux §5：输入框聚焦时预取工作台路由代码。id 任意，只为匹配 /p/[id] 路由，
+// 不创建项目，也不触达任何数据接口。
+const PREFETCH_ROUTE_ID = "00000000-0000-4000-8000-0000000000d1";
 
 function byUpdatedAtDesc(a: ProjectSummary, b: ProjectSummary) {
   return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
@@ -26,6 +31,8 @@ export function HomeScreen({ username }: { username: string }) {
   const [prompt, setPrompt] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // ux §5/§7.1：提交后立即在本页渲染工作台骨架过渡态，POST 成功后再切路由。
+  const [showWorkbenchTransition, setShowWorkbenchTransition] = useState(false);
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
@@ -70,6 +77,7 @@ export function HomeScreen({ username }: { username: string }) {
     if (isSubmitting) return;
     setSubmitError(null);
     setIsSubmitting(true);
+    setShowWorkbenchTransition(true);
     try {
       if (USE_MOCK_HOME) {
         // 开发预览：模拟创建后跳转；/p/[id] 由 T16 提供。
@@ -86,10 +94,15 @@ export function HomeScreen({ username }: { username: string }) {
       const body = (await response.json()) as { id: string };
       router.push(`/p/${body.id}`);
     } catch {
-      // 失败时保留输入内容，在输入框下方提示。
+      // 失败时回到首页表单：保留输入内容，在输入框下方提示。
+      setShowWorkbenchTransition(false);
       setSubmitError("创建项目失败，请重试");
       setIsSubmitting(false);
     }
+  }
+
+  function handleComposerFocus() {
+    router.prefetch(`/p/${PREFETCH_ROUTE_ID}`);
   }
 
   function handleDeleted(projectId: string) {
@@ -101,6 +114,10 @@ export function HomeScreen({ username }: { username: string }) {
   function fillExample(examplePrompt: string) {
     setPrompt(examplePrompt);
     textareaRef.current?.focus();
+  }
+
+  if (showWorkbenchTransition) {
+    return <WorkbenchSkeleton />;
   }
 
   return (
@@ -121,6 +138,7 @@ export function HomeScreen({ username }: { username: string }) {
             error={submitError}
             isSubmitting={isSubmitting}
             onChange={setPrompt}
+            onFocus={handleComposerFocus}
             onSubmit={(value) => void handleSubmit(value)}
             textareaRef={textareaRef}
             value={prompt}
