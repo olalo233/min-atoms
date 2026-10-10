@@ -7,6 +7,25 @@ const nullableDateTime = z.iso.datetime().nullable();
 export const RunStatusSchema = z.enum(["queued", "running", "succeeded", "failed", "cancelled"]);
 export const RunModeSchema = z.enum(["chat", "build"]);
 export const MessageRoleSchema = z.enum(["user", "assistant"]);
+export const AgentRoleSchema = z.enum(["pm", "designer", "engineer"]);
+export const AgentRefSchema = z.object({ id: z.string(), role: AgentRoleSchema });
+export const PlanTaskSchema = z.object({
+  content: z.string(),
+  status: z.enum(["pending", "in_progress", "completed", "abandoned", "blocked"]),
+  blocker: z.string().optional(),
+  locked: z.boolean().optional(),
+});
+export const PlanPhaseSchema = z.object({ name: z.string(), tasks: z.array(PlanTaskSchema) });
+
+export const AnnotationSchema = z.object({
+  route: z.string().max(200),
+  tag: z.string().max(40),
+  text: z.string().max(200),
+  selector: z.string().max(300),
+  component: z.string().max(80).optional(),
+  source: z.string().max(200).optional(),
+  rect: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }),
+});
 
 export const VersionDTOSchema = z.object({
   id: idSchema,
@@ -39,9 +58,23 @@ export const RunEventSchema = z.discriminatedUnion("kind", [
     toolCallId: z.string().min(1),
     name: z.string().min(1),
     title: z.string().min(1),
+    agent: AgentRefSchema.optional(),
     ok: z.boolean().optional(),
     summary: z.string().optional(),
   }),
+  z.object({ runId: idSchema, seq: z.number().int().positive(), at: z.iso.datetime(), kind: z.literal("plan"), phases: z.array(PlanPhaseSchema) }),
+  z.object({
+    runId: idSchema,
+    seq: z.number().int().positive(),
+    at: z.iso.datetime(),
+    kind: z.literal("agent"),
+    phase: z.enum(["start", "end"]),
+    agent: AgentRefSchema,
+    label: z.string().max(60),
+    ok: z.boolean().optional(),
+    summary: z.string().max(200).optional(),
+  }),
+  z.object({ runId: idSchema, seq: z.number().int().positive(), at: z.iso.datetime(), kind: z.literal("steer"), messageId: idSchema }),
   z.object({
     runId: idSchema,
     seq: z.number().int().positive(),
@@ -61,6 +94,7 @@ export const MessageDTOSchema = z.object({
   role: MessageRoleSchema,
   mode: RunModeSchema,
   content: z.string(),
+  annotation: AnnotationSchema.nullable(),
   runId: idSchema.nullable(),
   versionId: idSchema.nullable(),
   createdAt: z.iso.datetime(),
@@ -92,6 +126,7 @@ export const ProjectDetailSchema = z.object({
   id: idSchema,
   name: z.string(),
   previewLabel: z.string().min(1),
+  accountSuspended: z.boolean(),
   currentVersionId: idSchema.nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
@@ -109,6 +144,10 @@ export const ManagerKickRequestSchema = z.object({ previewLabel: z.string().min(
 export const ManagerKickResponseSchema = z.object({});
 export const ManagerAbortRequestSchema = z.object({});
 export const ManagerAbortResponseSchema = z.object({});
+export const ManagerSteerRequestSchema = z.object({ messageId: idSchema, content: z.string(), annotation: AnnotationSchema.optional() });
+export const ManagerSteerResponseSchema = z.object({ accepted: z.boolean() });
+export const ManagerSuspendRequestSchema = z.object({});
+export const ManagerSuspendResponseSchema = z.object({});
 export const ManagerRestoreRequestSchema = z.object({ versionId: idSchema });
 export const ManagerRestoreResponseSchema = VersionDTOSchema;
 export const ManagerDeleteResponseSchema = z.object({});
@@ -118,8 +157,9 @@ export const WebCreateProjectRequestSchema = z.object({ prompt: z.string().min(1
 export const WebCreateProjectResponseSchema = z.object({ id: idSchema });
 export const WebProjectListResponseSchema = z.array(ProjectSummarySchema);
 export const WebProjectDetailResponseSchema = ProjectDetailSchema;
-export const WebCreateMessageRequestSchema = z.object({ content: z.string().min(1), mode: RunModeSchema });
-export const WebCreateMessageResponseSchema = z.object({ message: MessageDTOSchema, run: RunDTOSchema });
+export const WebCreateMessageRequestSchema = z.object({ content: z.string().min(1), mode: RunModeSchema, annotation: AnnotationSchema.optional() });
+export const WebCreateMessageResponseSchema = z.object({ message: MessageDTOSchema, run: RunDTOSchema.nullable(), steered: z.boolean() });
+export const WebErrorSchema = z.object({ error: z.enum(["input_rejected", "account_suspended", "screening_unavailable"]), message: z.string() });
 export const WebStopRunResponseSchema = z.object({});
 export const WebRestoreVersionResponseSchema = VersionDTOSchema;
 export const WebDeleteProjectResponseSchema = z.object({});
@@ -127,11 +167,42 @@ export const WebStreamTokenResponseSchema = z.object({ token: z.string().min(1),
 export const WebVmResponseSchema = z.object({ up: z.boolean() });
 
 export type RunEvent = z.infer<typeof RunEventSchema>;
+export type AgentRole = z.infer<typeof AgentRoleSchema>;
+export type AgentRef = z.infer<typeof AgentRefSchema>;
+export type PlanTask = z.infer<typeof PlanTaskSchema>;
+export type PlanPhase = z.infer<typeof PlanPhaseSchema>;
+export type Annotation = z.infer<typeof AnnotationSchema>;
 export type VersionDTO = z.infer<typeof VersionDTOSchema>;
 export type MessageDTO = z.infer<typeof MessageDTOSchema>;
 export type RunDTO = z.infer<typeof RunDTOSchema>;
 export type ProjectSummary = z.infer<typeof ProjectSummarySchema>;
 export type ProjectDetail = z.infer<typeof ProjectDetailSchema>;
+export type ManagerSteerRequest = z.infer<typeof ManagerSteerRequestSchema>;
+export type ManagerSteerResponse = z.infer<typeof ManagerSteerResponseSchema>;
+export type ManagerSuspendRequest = z.infer<typeof ManagerSuspendRequestSchema>;
+export type ManagerSuspendResponse = z.infer<typeof ManagerSuspendResponseSchema>;
+export type WebCreateMessageRequest = z.infer<typeof WebCreateMessageRequestSchema>;
+export type WebCreateMessageResponse = z.infer<typeof WebCreateMessageResponseSchema>;
+export type WebError = z.infer<typeof WebErrorSchema>;
+
+export function formatUserPrompt(content: string, annotation?: Annotation): string {
+  if (!annotation) return content;
+
+  const lines = [
+    content,
+    "",
+    "[用户在预览中标注的元素]",
+    `页面：${annotation.route}`,
+    `元素：<${annotation.tag}> \"${annotation.text}\"`,
+  ];
+  if (annotation.source || annotation.component) {
+    const location = [annotation.source, annotation.component ? `组件 ${annotation.component}` : undefined].filter(Boolean).join("（")
+      + (annotation.source && annotation.component ? "）" : "");
+    lines.push(`位置：${location}`);
+  }
+  lines.push(`选择器：${annotation.selector}`);
+  return lines.join("\n");
+}
 
 export const SSE_TOKEN_TTL_SECONDS = 10 * 60;
 const encoder = new TextEncoder();
