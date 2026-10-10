@@ -1,7 +1,8 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 
-import { WorkbenchScreen, WorkbenchSkeleton } from "@/components/workbench/workbench-screen";
+import { WorkbenchScreen } from "@/components/workbench/workbench-screen";
+import { WorkbenchSkeleton } from "@/components/workbench/workbench-skeleton";
 import { getCurrentUser } from "@/lib/auth/session";
 
 import "../workbench.css";
