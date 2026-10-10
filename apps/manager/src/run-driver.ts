@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
-import { ManagerKickRequestSchema, ManagerAbortRequestSchema } from "@min-atoms/protocol";
+import { ManagerKickRequestSchema, ManagerAbortRequestSchema, ManagerSteerRequestSchema,
+  ManagerSuspendRequestSchema, formatUserPrompt, type ManagerSteerRequest } from "@min-atoms/protocol";
 import type { DurableEvents, HeartbeatTimers } from "./events";
 import { ManagerError, validateProjectId } from "./errors";
 import type { ProjectRuntime } from "./runtime";
@@ -11,13 +12,13 @@ import type { createManager } from "./manager";
 
 type Active = {
   run: QueuedRun; phase: string; cancelled: boolean; spawned: boolean;
-  signal: AbortController; rpc?: OmpRpc; aborting?: Promise<void>; stopFailed?: boolean;
+  signal: AbortController; rpc?: OmpRpc; buffer?: RunBuffer; aborting?: Promise<void>; stopFailed?: boolean;
 };
 type Queue = { dirty: boolean; task: Promise<void> };
 const cancelled = () => new Error("Run cancelled");
 
 export function createRunDriver(options: {
-  store: RunStore; runtime: Pick<ProjectRuntime, "project" | "ensure" | "restart">; events: DurableEvents;
+  store: RunStore; runtime: Pick<ProjectRuntime, "project" | "ensure" | "restart" | "stop">; events: DurableEvents;
   spawn?: (container: string, mode: "build" | "chat") => RpcTransport;
   command?: RunCommand; now?: () => number; timers?: HeartbeatTimers; rpcTimers?: RpcTimers;
   onError?: (error: unknown) => void;
@@ -27,12 +28,14 @@ export function createRunDriver(options: {
   const command = options.command ?? runCommand;
   const active = new Map<string, Active>();
   const queues = new Map<string, Queue>();
+  const suspending = new Map<string, Promise<void>>();
   const guard = (state: Active) => { if (state.cancelled) throw cancelled(); };
 
   async function execute(projectId: string, label: string, state: Active) {
     const backlog = await store.backlog(projectId, 0);
     const seq = backlog.filter(row => row.event.runId === state.run.id).at(-1)?.event.seq ?? 0;
     const buffer = new RunBuffer(events, projectId, state.run.id, seq, now, options.timers);
+    state.buffer = buffer;
     const mapper = new OmpEventMapper(body => buffer.add(body));
     const phase = (status: "starting" | "running" | "verifying" | "repairing" | "committing", detail?: string) => {
       guard(state); state.phase = status; buffer.add({ kind: "status", status, ...(detail ? { detail } : {}) });
@@ -52,7 +55,7 @@ export function createRunDriver(options: {
         : spawnOmp(label, state.run.mode, () => runtime.restart(projectId, label)), frame => mapper.receive(frame), options.rpcTimers);
       state.spawned = true;
       await state.rpc.open(state.run.mode, state.signal.signal); guard(state);
-      phase("running"); await prompt(state.run.content);
+      phase("running"); await prompt(formatUserPrompt(state.run.content, state.run.annotation ?? undefined));
       if (state.run.mode === "build") {
         let failure = "";
         for (let attempt = 0; attempt <= 2; attempt++) {
@@ -70,7 +73,7 @@ export function createRunDriver(options: {
           if (!failure) break;
           if (attempt === 2) throw new Error(`构建未通过：${failure.slice(-4000)}`);
           phase("repairing", `发现问题，自动修复中（第 ${attempt + 1}/2 轮）…`);
-          await prompt(`请修复以下问题\n${failure.slice(-4000)}`);
+          await prompt(`检查未通过，请安排修复：\n${failure.slice(-4000)}`);
         }
         guard(state);
         const version = await store.versionState(projectId); guard(state);
@@ -139,8 +142,10 @@ export function createRunDriver(options: {
   async function drain(projectId: string, label: string, queue: Queue) {
     do {
       queue.dirty = false;
+      if (suspending.has(projectId)) return;
       if (await store.running(projectId)) return;
       const run = await store.nextRun(projectId);
+      if (suspending.has(projectId)) return;
       if (!run) {
         if (queue.dirty) continue;
         // Remove synchronously with the idle decision. A kick after this point
@@ -159,6 +164,7 @@ export function createRunDriver(options: {
 
   async function kick(projectId: string, previewLabel?: string) {
     const project = await runtime.project(projectId, previewLabel);
+    if (suspending.has(project.id)) return;
     const existing = queues.get(project.id);
     if (existing) { existing.dirty = true; return; }
     // Publish queue state before starting the async drain. Kicks resolve after
@@ -191,7 +197,51 @@ export function createRunDriver(options: {
       .catch(() => { state.stopFailed = true; });
     if (state.aborting) await state.aborting;
   }
-  return { kick, abort, async idle(projectId: string) { await queues.get(projectId)?.task; } };
+
+  async function steer(projectId: string, runId: string, input: ManagerSteerRequest) {
+    validateProjectId(projectId); validateProjectId(runId);
+    const state = active.get(projectId.toLowerCase());
+    if (!state || state.run.id !== runId.toLowerCase() || state.run.mode !== "build" || state.cancelled
+      || !["running", "repairing"].includes(state.phase) || !state.rpc?.promptInFlight || !state.buffer) return false;
+    try { await state.rpc.steer(formatUserPrompt(input.content, input.annotation)); }
+    catch { return false; }
+    state.buffer.add({ kind: "steer", messageId: input.messageId });
+    await state.buffer.flush();
+    return true;
+  }
+
+  async function suspend(projectId: string): Promise<void> {
+    const project = await runtime.project(projectId);
+    const existing = suspending.get(project.id);
+    if (existing) return existing;
+    const task = (async () => {
+      // Yield until the gate is published, so drains cannot claim more work.
+      await Promise.resolve();
+      try {
+        for (const run of await store.queuedRuns(project.id)) {
+          await events.finish(project.id, { runId: run.id, expected: "queued", status: "cancelled",
+            content: "账号已暂停，任务已取消", now: new Date(now()) });
+        }
+        const state = active.get(project.id);
+        if (state) {
+          try { await abort(project.id, state.run.id); }
+          catch (error) {
+            // Commit is manager-owned and cannot be interrupted; let it finish
+            // before stopping the container. A just-cancelled queue is also idle.
+            if (!(error instanceof ManagerError && error.status === 409)) throw error;
+          }
+        }
+        await queues.get(project.id)?.task;
+      } finally {
+        // Wait for abort/restart/stash above before stopping its container.
+        await runtime.stop(project.id);
+      }
+    })();
+    suspending.set(project.id, task);
+    try { await task; }
+    finally { suspending.delete(project.id); }
+  }
+  return { kick, abort, steer, suspend, async idle(projectId: string) { await queues.get(projectId)?.task; } };
 }
 
 export function registerRunRoutes(app: Hono, driver: ReturnType<typeof createRunDriver>) {
@@ -206,6 +256,17 @@ export function registerRunRoutes(app: Hono, driver: ReturnType<typeof createRun
     const body = ManagerAbortRequestSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!body.success) throw new ManagerError(400, "Invalid abort body");
     await driver.abort(c.req.param("id"), c.req.param("runId"));
+    return c.json({});
+  });
+  app.post("/projects/:id/runs/:runId/steer", async c => {
+    const body = ManagerSteerRequestSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!body.success) throw new ManagerError(400, "Invalid steer body");
+    return c.json({ accepted: await driver.steer(c.req.param("id"), c.req.param("runId"), body.data) });
+  });
+  app.post("/projects/:id/suspend", async c => {
+    const body = ManagerSuspendRequestSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!body.success) throw new ManagerError(400, "Invalid suspend body");
+    await driver.suspend(c.req.param("id"));
     return c.json({});
   });
 }

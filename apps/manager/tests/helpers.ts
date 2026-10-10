@@ -91,7 +91,7 @@ export class DockerProcess {
       const container = this.containers.get(name);
       return container ? ok(JSON.stringify({ ...container, name: `/${name}` })) : { exitCode: 1, stdout: "" };
     }
-    const name = argv[1] === "restart" ? argv.at(-1)! : argv[2];
+    const name = ["restart", "stop"].includes(argv[1]) ? argv.at(-1)! : argv[2];
     if (argv[1] === "create") {
       const values = (flag: string) => argv.flatMap((value, index) => value === flag ? [argv[index + 1]] : []);
       const container: FakeContainer = {
@@ -135,7 +135,7 @@ export async function harness() {
   const probes: Array<{ ip: string; timeout: number }> = [];
   const files = new ProjectFiles(root, { uid: process.getuid!(), gid: process.getgid!() });
   const runtime = new ProjectRuntime(store, {
-    files, spawn: docker.spawn, clock: { now: () => now, async sleep(ms) { now += ms; } },
+    files, spawn: docker.spawn, webOrigin: origin, clock: { now: () => now, async sleep(ms) { now += ms; } },
     async ready(ip, timeout) { probes.push({ ip, timeout }); return readiness; },
   });
   const manager = createManager({ secret, webOrigin: origin, store, runtime, timers, now: () => now });

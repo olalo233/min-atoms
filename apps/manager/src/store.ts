@@ -1,6 +1,6 @@
 import { appendMessage, projects, runs, runEvents, messages, versions, type Run } from "@min-atoms/db";
 import * as schema from "@min-atoms/db/schema";
-import { RunEventSchema, ManagerStreamEventSchema, type RunEvent } from "@min-atoms/protocol";
+import { RunEventSchema, ManagerStreamEventSchema, type RunEvent, type Annotation } from "@min-atoms/protocol";
 import { and, asc, eq, gt, inArray, sql, type ExtractTablesWithRelations } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { ManagerError } from "./errors";
@@ -18,7 +18,7 @@ export interface ManagerStore {
   queuedProjects(): Promise<string[]>;
 }
 
-export type QueuedRun = Run & { content: string };
+export type QueuedRun = Run & { content: string; annotation: Annotation | null };
 export type FinishRun = {
   runId: string; expected: "queued" | "running";
   status: "succeeded" | "failed" | "cancelled"; content: string; now: Date;
@@ -26,6 +26,7 @@ export type FinishRun = {
 };
 export interface RunStore extends ManagerStore {
   nextRun(projectId: string): Promise<QueuedRun | undefined>;
+  queuedRuns(projectId: string): Promise<Run[]>;
   run(projectId: string, runId: string): Promise<Run | undefined>;
   claim(projectId: string, runId: string, now: Date): Promise<boolean>;
   versionState(projectId: string): Promise<{ next: number; current: number | null }>;
@@ -43,11 +44,18 @@ export function createManagerStore<TResult extends PgQueryResultHKT>(
 ): RunStore {
   return {
     async nextRun(projectId) {
-      const [row] = await db.select({ run: runs, content: messages.content }).from(runs)
+      // T33 owns this nullable JSONB column. Select the final contract explicitly
+      // until its Drizzle schema is integrated; absence is an integration error.
+      const [row] = await db.select({ run: runs, content: messages.content,
+        annotation: sql<Annotation | null>`"messages"."annotation"` }).from(runs)
         .innerJoin(messages, eq(runs.userMessageId, messages.id))
         .where(and(eq(runs.projectId, projectId), eq(runs.status, "queued")))
         .orderBy(asc(messages.seq)).limit(1);
-      return row ? { ...row.run, content: row.content } : undefined;
+      return row ? { ...row.run, content: row.content, annotation: row.annotation } : undefined;
+    },
+    async queuedRuns(projectId) {
+      return db.select().from(runs).where(and(eq(runs.projectId, projectId), eq(runs.status, "queued")))
+        .orderBy(asc(runs.createdAt), asc(runs.id));
     },
     async run(projectId, runId) {
       const [row] = await db.select().from(runs)

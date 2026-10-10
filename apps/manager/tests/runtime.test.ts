@@ -52,12 +52,14 @@ test("concurrent ensure creates one isolated app runtime and repeated ensure pre
     expect(create[0]).toEqual([
       "docker", "create", "--name", project.previewLabel, "--network", "ma-net", "--user", "app",
       "--memory", "2g", "--cpus", "2", "--pids-limit", "512",
+      "-e", "MA_WEB_ORIGIN=https://web.example",
       "--label", "min-atoms.managed=true", "--label", "min-atoms.role=project",
       "--label", `min-atoms.project-id=${project.id}`, "--label", `min-atoms.preview-label=${project.previewLabel}`,
       ...["workspace", "data", "state"].flatMap(name => ["--mount", `type=bind,src=${h.root}/${project.id}/${name},dst=/${name}`]),
       "min-atoms/project",
     ]);
-    expect(create[0].some(arg => ["--env", "-e", "-p", "--publish", "--privileged"].includes(arg))).toBe(false);
+    expect(create[0].filter(arg => arg === "-e")).toHaveLength(1);
+    expect(create[0].some(arg => ["--env", "-p", "--publish", "--privileged"].includes(arg))).toBe(false);
     for (const command of h.docker.commands.filter(argv => ["create", "start"].includes(argv[1]))) {
       const index = h.docker.commands.indexOf(command);
       expect(h.docker.commands[index - 1]).toEqual(["iptables", "-C", "DOCKER-USER", "-d", "169.254.169.254", "-j", "DROP"]);
@@ -300,4 +302,26 @@ test("entrypoint imports are inert and production configuration keeps the fixed 
   for (const config of [{}, { ...valid, HOST: "0.0.0.0" }, { ...valid, PORT: "8080" },
     { ...valid, DATABASE_URL: "postgres://test:test@db.invalid:6543/test" }, { ...valid, WEB_ORIGIN: "https://web.example/path" },
     { ...valid, MA_SHARED_SECRET: "" }]) expect(() => readManagerConfig(config)).toThrow();
+});
+
+test("suspend stop uses a two-second timeout, validates ownership and preserves volumes; stopped/missing containers are idempotent", async () => {
+  const h = await harness();
+  try {
+    const project = h.store.add(1); const foreign = h.store.add(2);
+    h.docker.add(foreign, h.root);
+    await h.runtime.stop(project.id); expect(mutations(h.docker.commands)).toEqual([]);
+    await h.runtime.ensure(project.id, project.previewLabel);
+    for (const name of ["workspace", "data", "state"]) await writeFile(join(h.root, project.id, name, "retained"), name);
+    h.docker.commands.length = 0;
+    await h.runtime.stop(project.id); await h.runtime.stop(project.id);
+    expect(mutations(h.docker.commands)).toEqual([["docker", "stop", "-t", "2", project.previewLabel]]);
+    expect(h.docker.containers.get(project.previewLabel)?.running).toBe(false);
+    expect(h.docker.containers.get(foreign.previewLabel)?.running).toBe(true);
+    for (const name of ["workspace", "data", "state"]) expect(await readFile(join(h.root, project.id, name, "retained"), "utf8")).toBe(name);
+    const container = h.docker.containers.get(project.previewLabel)!;
+    container.running = true; container.labels["min-atoms.project-id"] = foreign.id;
+    h.docker.commands.length = 0;
+    await expect(h.runtime.stop(project.id)).rejects.toThrow("not owned");
+    expect(mutations(h.docker.commands)).toEqual([]);
+  } finally { await h.cleanup(); }
 });

@@ -9,7 +9,7 @@ export function createManager(options: {
   secret: string; webOrigin: string; store: ManagerStore;
   runtime?: ProjectRuntime; now?: () => number; timers?: HeartbeatTimers;
 }) {
-  const runtime = options.runtime ?? new ProjectRuntime(options.store);
+  const runtime = options.runtime ?? new ProjectRuntime(options.store, { webOrigin: options.webOrigin });
   const events = new DurableEvents(options.store);
   const app = createManagerApp({ ...options, runtime, events });
   return {

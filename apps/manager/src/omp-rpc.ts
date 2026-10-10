@@ -1,4 +1,5 @@
 // Wire contract: omp v18.8.4 modes/rpc/rpc-types.ts and rpc-mode.ts.
+import type { PlanPhase } from "@min-atoms/protocol";
 export type Frame = Record<string, any>;
 export const stopFailureContent = "停止时环境异常，应用可能没有完全停止，请稍后重试";
 export interface RpcTransport {
@@ -135,11 +136,15 @@ export class OmpRpc {
       if (signal.aborted) abort();
       await Promise.race([this.ready.promise, stopped.promise]);
       const response = await Promise.race([this.request("open_session", {
-        sessionDir: "/state/omp-sessions", provider: "ma-gateway", modelId: "deepseek-flash",
+        sessionDir: "/state/omp-sessions", provider: "ma-gateway", modelId: process.env.MA_PM_MODEL ?? "deepseek-flash",
       }), stopped.promise]);
       if (response.data?.cancelled !== false) throw new Error("OMP session open cancelled");
       if (signal.aborted) throw new Error("Run cancelled");
-      if (mode === "chat") {
+      if (mode === "build") {
+        await Promise.race([this.setTodos([]), stopped.promise]);
+        if (signal.aborted) throw new Error("Run cancelled");
+        await Promise.race([this.subscribeSubagents("events"), stopped.promise]);
+      } else {
         const state = await Promise.race([this.request("get_state"), stopped.promise]);
         const names = state.data?.dumpTools?.map((tool: Frame) => tool.name);
         if (!Array.isArray(names) || names.length !== 3 || [...names].sort().join(",") !== "glob,grep,read") {
@@ -148,6 +153,11 @@ export class OmpRpc {
       }
     } finally { deadline(); signal.removeEventListener("abort", abort); }
   }
+
+  setTodos(phases: PlanPhase[]) { return this.request("set_todos", { phases }); }
+  subscribeSubagents(level: "events") { return this.request("set_subagent_subscription", { level }); }
+  steer(message: string) { return this.request("steer", { message }); }
+  get promptInFlight() { return !!this.promptWait && !this.settled && !this.cancelling && !this.failure; }
 
   async prompt(message: string): Promise<Frame> {
     const id = `manager-${++this.counter}`;

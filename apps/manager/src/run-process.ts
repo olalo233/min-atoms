@@ -1,6 +1,6 @@
 import type { RpcTransport } from "./omp-rpc";
 
-export const buildTools = "read,write,edit,bash,eval,grep,glob,todo";
+export const buildTools = "read,grep,glob,todo,task";
 export const chatTools = "read,grep,glob";
 const processEnv = () => ({ PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" });
 const execArgs = (container: string) => ["docker", "exec", "-i", "-u", "app", "-w", "/workspace", container];
@@ -8,7 +8,8 @@ const execArgs = (container: string) => ["docker", "exec", "-i", "-u", "app", "-
 export function spawnOmp(container: string, mode: "build" | "chat", restart: () => Promise<boolean>,
   spawn: typeof Bun.spawn = Bun.spawn): RpcTransport {
   const child = spawn([...execArgs(container), "omp", "--mode", "rpc", "--no-ui", "--tools",
-    mode === "build" ? buildTools : chatTools], { env: processEnv(), stdin: "pipe", stdout: "pipe", stderr: "ignore" });
+    mode === "build" ? buildTools : chatTools, "--append-system-prompt", "/home/app/.omp/agent/roles/pm.md"],
+    { env: processEnv(), stdin: "pipe", stdout: "pipe", stderr: "ignore" });
   return { stdout: child.stdout, exited: child.exited,
     send(line) { child.stdin.write(line); child.stdin.flush(); },
     close() { child.stdin.end(); }, kill() { child.kill("SIGKILL"); },

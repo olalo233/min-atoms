@@ -6,7 +6,7 @@ import { migrate } from "drizzle-orm/pglite/migrator";
 import { eq, sql } from "drizzle-orm";
 import { appendMessage } from "@min-atoms/db";
 import * as schema from "@min-atoms/db/schema";
-import type { RunEvent } from "@min-atoms/protocol";
+import { formatUserPrompt, type RunEvent, type Annotation } from "@min-atoms/protocol";
 import { createManagerStore } from "../src/store";
 import { DurableEvents } from "../src/events";
 import { createRunDriver, registerRunRoutes } from "../src/run-driver";
@@ -25,6 +25,9 @@ let owner: string;
 let serial = 5000;
 beforeAll(async () => {
   await migrate(db, { migrationsFolder: fileURLToPath(new URL("../../../packages/db/migrations", import.meta.url)) });
+  // Exercise T33's approved nullable column in this isolated database while
+  // keeping production schema/migrations outside the T31 task boundary.
+  await db.execute(sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS annotation jsonb`);
   [owner] = (await db.insert(schema.users).values({ username: "t12", passwordHash: "test" }).returning()).map(row => row.id);
 }, 30_000);
 afterAll(async () => { await client.close(); });
@@ -66,6 +69,7 @@ class FakeRpc implements RpcTransport {
   status = "completed";
   text = "应用完成\n细节";
   onPrompt?: (frame: Frame) => void;
+  steerSuccess = true;
   constructor(readonly log: string[] = []) {
     this.stdout = new ReadableStream({ start: controller => { this.controller = controller; } });
     this.emit({ type: "ready", protocolVersion: 1 });
@@ -78,6 +82,10 @@ class FakeRpc implements RpcTransport {
     const frame = JSON.parse(line); this.commands.push(frame); this.log.push(frame.type);
     if (frame.type === "open_session") this.emit({ type: "response", id: frame.id, command: frame.type, success: true, data: { cancelled: false } });
     if (frame.type === "get_state") this.emit({ type: "response", id: frame.id, command: frame.type, success: true, data: { dumpTools: this.tools.map(name => ({ name })) } });
+    if (["set_todos", "set_subagent_subscription", "steer"].includes(frame.type)) {
+      this.emit({ type: "response", id: frame.id, command: frame.type,
+        success: frame.type === "steer" ? this.steerSuccess : true });
+    }
     if (frame.type === "prompt") {
       this.onPrompt?.(frame);
       if (this.auto) {
@@ -121,6 +129,7 @@ async function harness() {
     },
     ensure: async () => ensure(),
     restart: async () => true,
+    stop: async () => { log.push("stop container"); },
   };
   const driver = createRunDriver({ store, runtime, events, timers, rpcTimers,
     now: () => Date.parse(at),
@@ -174,7 +183,7 @@ test("kick schedules immediately, uses canonical project IDs and serial message 
   expect((await store.run(h.p.id, second.id))?.status).toBe("succeeded");
   expect(h.invocations[1].commands.map(c => c.type)).toEqual(["open_session", "get_state", "prompt"]);
   expect(h.timers.intervals).toEqual([250, 250]);
-  expect(buildTools).toBe("read,write,edit,bash,eval,grep,glob,todo"); expect(chatTools).toBe("read,grep,glob");
+  expect(buildTools).toBe("read,grep,glob,todo,task"); expect(chatTools).toBe("read,grep,glob");
 });
 
 test("a kick during an idle query does not strand newly queued work; duplicate kicks execute once", async () => {
@@ -200,7 +209,7 @@ test("two repair prompts share the original process, then failure keeps changes 
   const h = await harness(); const r = await queue(h.p.id); h.failChecks(3);
   await h.driver.kick(h.p.id); await h.driver.idle(h.p.id);
   expect(h.invocations).toHaveLength(1);
-  expect(h.invocations[0].commands.filter(c => c.type === "prompt").map(c => c.message)).toEqual(["request", "请修复以下问题\ntypecheck failure", "请修复以下问题\ntypecheck failure"]);
+  expect(h.invocations[0].commands.filter(c => c.type === "prompt").map(c => c.message)).toEqual(["request", "检查未通过，请安排修复：\ntypecheck failure", "检查未通过，请安排修复：\ntypecheck failure"]);
   expect(h.records.filter(e => e.kind === "status" && e.status === "repairing")).toHaveLength(2);
   expect((await store.run(h.p.id, r.id))?.status).toBe("failed");
   expect(h.commands.some(c => c[0] === "git")).toBe(false); expect(h.priorChanges()).toBe(true);
@@ -528,7 +537,7 @@ for (const name of ["snake-build", "followup-build", "chat-readonly", "abort"]) 
     const ends = bodies.filter(e => e.kind === "tool" && e.phase === "end");
     expect(ends.map(e => e.toolCallId).sort()).toEqual(starts.map(e => e.toolCallId).sort());
     const expectedTools: Record<string, string[]> = {
-      "snake-build": ["bash", "edit", "eval", "read", "todo", "write"],
+      "snake-build": ["bash", "edit", "eval", "read", "write"],
       "followup-build": ["bash", "write"], "chat-readonly": ["read"], "abort": ["bash", "write"],
     };
     expect(starts.map(e => e.name).sort()).toEqual(expectedTools[name]);
@@ -602,4 +611,178 @@ test("250ms durable batch merges adjacent visible deltas, streams only persisted
   await h.driver.abort(h.p.id, r.id); await h.driver.idle(h.p.id);
   expect(h.records.at(-1)).toMatchObject({ seq: 7, status: "cancelled", detail: "已停止讨论，应用未更改" });
   expect(h.records).toEqual((await store.backlog(h.p.id, 0)).map(r => r.event));
+});
+
+const annotation: Annotation = { route: "/settings#save", tag: "button", text: "保存", selector: "#save",
+  source: "src/settings.tsx:12", component: "Settings", rect: { x: 0, y: 0, w: 100, h: 30 } };
+const steerInput = () => ({ messageId: crypto.randomUUID(), content: "改为蓝色", annotation });
+function routes(h: Awaited<ReturnType<typeof harness>>) {
+  const app = createManagerApp({ secret, webOrigin: origin, store, events: h.events, runtime: h.runtime as unknown as ProjectRuntime });
+  registerRunRoutes(app, h.driver);
+  return app;
+}
+
+test("build open clears todos then subscribes events before annotated prompt; chat does neither", async () => {
+  const h = await harness(); const build = await queue(h.p.id); await queue(h.p.id, "chat");
+  await db.execute(sql`UPDATE messages SET annotation = ${JSON.stringify(annotation)}::jsonb WHERE id = ${build.userMessageId}`);
+  expect((await store.nextRun(h.p.id))?.annotation).toEqual(annotation);
+  await h.driver.kick(h.p.id); await h.driver.idle(h.p.id);
+  const commands = h.invocations[0].commands;
+  expect(commands.map(frame => frame.type)).toEqual(["open_session", "set_todos", "set_subagent_subscription", "prompt"]);
+  expect(commands[1]).toMatchObject({ phases: [] });
+  expect(commands[2]).toMatchObject({ level: "events" });
+  expect(commands[3].message).toBe(formatUserPrompt("request", annotation));
+  expect(h.invocations[1].commands.map(frame => frame.type)).toEqual(["open_session", "get_state", "prompt"]);
+  expect(h.errors).toEqual([]);
+});
+
+test("open_session selects MA_PM_MODEL with deepseek-flash as default", async () => {
+  const prior = process.env.MA_PM_MODEL;
+  try {
+    for (const model of [undefined, "pm-test-model"]) {
+      if (model === undefined) delete process.env.MA_PM_MODEL; else process.env.MA_PM_MODEL = model;
+      const rpc = new FakeRpc(); const omp = new OmpRpc(rpc, () => {});
+      await omp.open("build", new AbortController().signal);
+      expect(rpc.commands[0]).toMatchObject({ provider: "ma-gateway", modelId: model ?? "deepseek-flash" });
+      await omp.close();
+    }
+  } finally { if (prior === undefined) delete process.env.MA_PM_MODEL; else process.env.MA_PM_MODEL = prior; }
+});
+
+for (const phase of ["running", "repairing"] as const) {
+  test(`steer route accepts ${phase} build prompt only after RPC success and persists annotated delivery`, async () => {
+    const h = await harness(); const run = await queue(h.p.id); const input = steerInput();
+    if (phase === "repairing") h.failChecks(1);
+    h.configure(rpc => {
+      rpc.auto = false;
+      rpc.onPrompt = frame => {
+        if (phase === "repairing" && rpc.commands.filter(command => command.type === "prompt").length === 1) rpc.finish(frame.id);
+      };
+    });
+    await h.driver.kick(h.p.id);
+    await until(() => (h.invocations[0]?.commands.filter(frame => frame.type === "prompt").length ?? 0) === (phase === "running" ? 1 : 2));
+    const rpc = h.invocations[0]; const send = rpc.send.bind(rpc);
+    let steering: Frame | undefined;
+    rpc.send = line => {
+      const frame = JSON.parse(line);
+      if (frame.type === "steer") { rpc.commands.push(frame); steering = frame; } else send(line);
+    };
+    const app = routes(h);
+    let finished = false;
+    const response = Promise.resolve(app.request(`/projects/${h.p.id.toUpperCase()}/runs/${run.id.toUpperCase()}/steer`,
+      { method: "POST", headers: auth, body: JSON.stringify(input) })).then(response => { finished = true; return response; });
+    await until(() => !!steering);
+    expect(finished).toBe(false); expect(h.records.some(event => event.kind === "steer")).toBe(false);
+    expect(steering!.message).toBe(formatUserPrompt(input.content, annotation));
+    rpc.emit({ type: "response", command: "steer", id: steering!.id, success: true });
+    const accepted = await response;
+    expect(accepted.status).toBe(200); expect(await accepted.json()).toEqual({ accepted: true });
+    expect(h.records.at(-1)).toMatchObject({ kind: "steer", runId: run.id, messageId: input.messageId });
+    expect((await store.backlog(h.p.id, 0)).at(-1)?.event).toEqual(h.records.at(-1)!);
+    rpc.finish(); await h.driver.idle(h.p.id);
+    expect((await store.run(h.p.id, run.id))?.status).toBe("succeeded");
+    expect(h.errors).toEqual([]);
+  });
+}
+
+for (const phase of ["starting", "verifying", "committing"] as const) {
+  test(`steer route rejects ${phase} without an RPC request or delivery event`, async () => {
+    const h = await harness(); const run = await queue(h.p.id); const entered = deferred<void>(); const release = deferred<void>();
+    if (phase === "starting") h.setEnsure(async () => { entered.resolve(); await release.promise; });
+    else h.setHook(async (_container, argv) => {
+      if (phase === "verifying" ? argv[0] === "bun" : argv[1] === "commit") { entered.resolve(); await release.promise; }
+      return { exitCode: 0, output: argv[1] === "rev-parse" ? "c".repeat(40) : "" };
+    });
+    await h.driver.kick(h.p.id); await entered.promise;
+    const response = await routes(h).request(`/projects/${h.p.id}/runs/${run.id}/steer`,
+      { method: "POST", headers: auth, body: JSON.stringify(steerInput()) });
+    expect(response.status).toBe(200); expect(await response.json()).toEqual({ accepted: false });
+    expect(h.invocations.flatMap(rpc => rpc.commands).some(frame => frame.type === "steer")).toBe(false);
+    expect(h.records.some(event => event.kind === "steer")).toBe(false);
+    release.resolve(); await h.driver.idle(h.p.id);
+    expect(h.errors).toEqual([]);
+  });
+}
+
+test("steer rejects no active run, wrong id, chat, settled prompt and RPC rejection with HTTP 200 false", async () => {
+  const h = await harness(); const app = routes(h);
+  const request = (runId: string, headers = auth, body = JSON.stringify(steerInput())) => app.request(`/projects/${h.p.id}/runs/${runId}/steer`, { method: "POST", headers, body });
+  const expectRejected = async (runId: string) => { const response = await request(runId); expect(response.status).toBe(200); expect(await response.json()).toEqual({ accepted: false }); };
+  await expectRejected(crypto.randomUUID());
+  expect((await request(crypto.randomUUID(), { Authorization: "Bearer wrong" })).status).toBe(401);
+  expect((await request(crypto.randomUUID(), auth, "{}")).status).toBe(400);
+  const chat = await queue(h.p.id, "chat"); h.configure(rpc => { rpc.auto = false; });
+  await h.driver.kick(h.p.id); await until(() => h.invocations[0]?.commands.some(frame => frame.type === "prompt") ?? false);
+  await expectRejected(chat.id); h.invocations[0].finish(); await h.driver.idle(h.p.id);
+  const build = await queue(h.p.id); await h.driver.kick(h.p.id);
+  await until(() => h.invocations[1]?.commands.some(frame => frame.type === "prompt") ?? false);
+  await expectRejected(crypto.randomUUID());
+  const rpc = h.invocations[1]; rpc.steerSuccess = false; await expectRejected(build.id);
+  expect(h.records.some(event => event.kind === "steer")).toBe(false);
+  rpc.finish(); await h.driver.idle(h.p.id); await expectRejected(build.id);
+  expect(h.errors).toEqual([]);
+});
+
+test("RPC promptInFlight ends on settlement even before driver advances phases", async () => {
+  const rpc = new FakeRpc(); rpc.auto = false;
+  const omp = new OmpRpc(rpc, () => {}); await omp.open("build", new AbortController().signal);
+  const prompt = omp.prompt("build"); expect(omp.promptInFlight).toBe(true);
+  rpc.finish(undefined, false); await Bun.sleep(1); expect(omp.promptInFlight).toBe(true);
+  rpc.emit({ type: "session_settled" }); await prompt; expect(omp.promptInFlight).toBe(false);
+  await omp.close();
+});
+
+test("suspend route conditionally cancels all queued runs with suspension text and is idempotent", async () => {
+  const h = await harness(); const first = await queue(h.p.id); const second = await queue(h.p.id, "chat");
+  const foreign = await harness(); const retained = await queue(foreign.p.id);
+  const app = routes(h); const path = `/projects/${h.p.id}/suspend`;
+  expect((await app.request(path, { method: "POST", body: "{}" })).status).toBe(401);
+  expect((await app.request(path, { method: "POST", headers: auth, body: "{" })).status).toBe(400);
+  for (let i = 0; i < 2; i++) {
+    const response = await app.request(path, { method: "POST", headers: auth, body: "{}" });
+    expect(response.status).toBe(200); expect(await response.json()).toEqual({});
+  }
+  for (const run of [first, second]) await terminal(h.p.id, run.id, "账号已暂停，任务已取消");
+  expect((await store.run(foreign.p.id, retained.id))?.status).toBe("queued");
+  expect(h.invocations).toEqual([]); expect(h.commands).toEqual([]); expect(h.log).toEqual(["stop container", "stop container"]);
+});
+
+test("suspend aborts active build, cancels queue, waits for restart/stash and then stops without draining another run", async () => {
+  const h = await harness(); const run = await queue(h.p.id); const queued = await queue(h.p.id, "chat");
+  h.configure(rpc => { rpc.auto = false; });
+  await h.driver.kick(h.p.id); await until(() => h.invocations[0]?.commands.some(frame => frame.type === "prompt") ?? false);
+  await Promise.all([h.driver.suspend(h.p.id), h.driver.suspend(h.p.id)]);
+  await terminal(h.p.id, run.id, "已停止，应用已回到初始状态");
+  await terminal(h.p.id, queued.id, "账号已暂停，任务已取消");
+  expect(h.invocations).toHaveLength(1); expect(h.errors).toEqual([]);
+  expect(h.log.filter(item => ["abort", "restart", "ready", "git stash", "stop container"].includes(item)))
+    .toEqual(["abort", "restart", "ready", "git stash", "stop container"]);
+});
+
+test("suspend during starting aborts before spawn and stops only after ensure exits", async () => {
+  const h = await harness(); const run = await queue(h.p.id); const entered = deferred<void>(); const release = deferred<void>();
+  h.setEnsure(async () => { entered.resolve(); await release.promise; });
+  await h.driver.kick(h.p.id); await entered.promise;
+  const suspended = h.driver.suspend(h.p.id);
+  await Bun.sleep(5); expect(h.log.includes("stop container")).toBe(false);
+  release.resolve(); await suspended;
+  await terminal(h.p.id, run.id, "已取消，应用未更改");
+  expect(h.invocations).toEqual([]); expect(h.commands).toEqual([]); expect(h.log.at(-1)).toBe("stop container");
+});
+
+test("suspend waits for manager-owned commit then stops container and cancels next queued run", async () => {
+  const h = await harness(); const run = await queue(h.p.id); const next = await queue(h.p.id, "chat");
+  const entered = deferred<void>(); const release = deferred<void>();
+  h.setHook(async (_container, argv) => {
+    if (argv[1] === "commit") { entered.resolve(); await release.promise; }
+    return { exitCode: 0, output: argv[1] === "rev-parse" ? "c".repeat(40) : "" };
+  });
+  await h.driver.kick(h.p.id); await entered.promise;
+  const suspended = h.driver.suspend(h.p.id);
+  await until(async () => (await store.run(h.p.id, next.id))?.status === "cancelled");
+  expect(h.log.includes("stop container")).toBe(false);
+  release.resolve(); await suspended;
+  expect((await store.run(h.p.id, run.id))?.status).toBe("succeeded");
+  expect(h.log.at(-1)).toBe("stop container"); expect(h.invocations).toHaveLength(1);
+  await terminal(h.p.id, next.id, "账号已暂停，任务已取消");
 });

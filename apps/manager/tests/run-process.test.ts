@@ -41,7 +41,8 @@ test("omp transport keeps tool configuration and delegates cleanup to project re
     const host = hostExec(); const ready = deferred<boolean>(); let restarts = 0;
     const rpc = spawnOmp("ma-00000001", mode, () => { restarts++; return ready.promise; }, host.spawn);
     expect(host.commands).toEqual([["docker", "exec", "-i", "-u", "app", "-w", "/workspace", "ma-00000001",
-      "omp", "--mode", "rpc", "--no-ui", "--tools", mode === "build" ? buildTools : chatTools]]);
+      "omp", "--mode", "rpc", "--no-ui", "--tools", mode === "build" ? buildTools : chatTools,
+      "--append-system-prompt", "/home/app/.omp/agent/roles/pm.md"]]);
     expect(Object.keys(host.environments[0])).toEqual(["PATH"]);
     const cleanup = rpc.cleanup(); let finished = false;
     void cleanup.then(() => { finished = true; });

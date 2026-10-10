@@ -36,14 +36,16 @@ export class ProjectRuntime {
   private readonly clock: RuntimeClock;
   readonly files: ProjectFiles;
   private readonly ready: (ip: string, timeoutMs: number) => Promise<boolean>;
+  private readonly webOrigin: string;
 
   constructor(private readonly store: Pick<ManagerStore, "project" | "busy" | "running">, options: {
-    spawn?: Spawn; clock?: RuntimeClock; files?: ProjectFiles;
+    spawn?: Spawn; clock?: RuntimeClock; files?: ProjectFiles; webOrigin?: string;
     ready?: (ip: string, timeoutMs: number) => Promise<boolean>;
   } = {}) {
     this.process = options.spawn ?? spawn;
     this.clock = options.clock ?? runtimeClock;
     this.files = options.files ?? new ProjectFiles();
+    this.webOrigin = options.webOrigin ?? process.env.WEB_ORIGIN ?? "";
     this.ready = options.ready ?? (async (ip, timeoutMs) => {
       try {
         const response = await fetch(`http://${ip}:5173/`, { signal: AbortSignal.timeout(timeoutMs), redirect: "manual" });
@@ -163,6 +165,7 @@ export class ProjectRuntime {
           await this.command([
             "docker", "create", "--name", label, "--network", "ma-net", "--user", "app",
             "--memory", "2g", "--cpus", "2", "--pids-limit", "512",
+            "-e", `MA_WEB_ORIGIN=${this.webOrigin}`,
             ...Object.entries({ ...ownershipLabels, "min-atoms.project-id": id, "min-atoms.preview-label": label })
               .flatMap(([key, value]) => ["--label", `${key}=${value}`]),
             ...["workspace", "data", "state"].flatMap(name => ["--mount", `type=bind,src=${this.files.path(id)}/${name},dst=/${name}`]),
@@ -174,6 +177,17 @@ export class ProjectRuntime {
         container = await this.inspect(label);
       }
       await this.waitReady(container, project);
+    });
+  }
+
+  stop(id: string): Promise<void> {
+    return this.mutate(async () => {
+      const project = await this.project(id);
+      if (!(await this.names()).includes(project.previewLabel)) return;
+      const container = await this.inspect(project.previewLabel);
+      if (!this.owns(container, project)) throw new ManagerError(409, "Container is not owned by this project");
+      if (container.running) await this.command(["docker", "stop", "-t", "2", project.previewLabel]);
+      this.lastUsed.delete(project.previewLabel);
     });
   }
 
