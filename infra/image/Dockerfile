@@ -56,6 +56,7 @@ RUN cd /opt/template \
 
 COPY infra/image/models.yml /home/app/.omp/agent/models.yml
 COPY infra/image/config.yml /home/app/.omp/agent/config.yml
+COPY --chown=app:app infra/image/omp-platform-AGENTS.md /home/app/.omp/agent/AGENTS.md
 RUN set -eux; \
     case "$OMP_MODEL_API" in \
         openai-completions|openai-responses) gateway_path=/v1 ;; \
