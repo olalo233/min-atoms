@@ -30,7 +30,7 @@ docs/requirements.md  用户需求清单（每轮维护）
 - 界面用 shadcn 组件和 Tailwind，贴合需求主题，完整可用，适配窄屏。不要留默认模板页、占位按钮或半成品。
 - Canvas 小游戏：用 `requestAnimationFrame` 游戏循环；用键盘事件监听控制；维护开始 / 进行中 / 结束 / 重新开始状态；组件卸载时取消动画帧并移除监听。
 - 修改 schema 后必须跑 `bun run db:generate` 生成迁移，迁移文件要提交。
-- 完成前自己跑 `bun run check` 确保通过，并用 `curl -sf localhost:5173/` 和相关 `/api/...` 接口自测。
+- 完成前自己跑 `bun run check` 确保通过，并用 `curl -sf localhost:5173/` 和相关 `/api/...` 的 GET 接口自测（只读，见平台规则）。
 
 ## 需求清单
 
