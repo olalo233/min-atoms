@@ -1,59 +1,195 @@
-/* Workbench-scoped styles (T16). Global layout/baseline belong to T15. */
+/* Workbench-scoped styles. Global tokens live in app/globals.css. */
 
-.wb-root {
-  font-family: "PingFang SC", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
-}
-
+/* Unlayered on purpose: must beat display utilities (e.g. the jump button's inline-flex). */
 .wb-hidden {
   display: none;
 }
 
-/* Streaming cursor (ux §6.2) */
-.wb-cursor {
-  animation: wb-blink 1s steps(2, start) infinite;
-}
-
-@keyframes wb-blink {
-  to {
-    visibility: hidden;
+/* Everything else is layered so Tailwind utilities on the same element win. */
+@layer components {
+  /* Streaming cursor (ux §6.2) */
+  .wb-cursor {
+    display: inline-block;
+    width: 0.5em;
+    height: 1.05em;
+    margin-left: 2px;
+    vertical-align: -0.15em;
+    border-radius: 1px;
+    background: var(--color-indigo-500);
+    animation: wb-blink 1s steps(2, start) infinite;
   }
-}
 
-/* Shimmer for status lines and the running pill (ux §2 state motion) */
-.wb-shimmer {
-  animation: wb-shimmer 1.8s ease-in-out infinite;
-}
-
-@keyframes wb-shimmer {
-  0%,
-  100% {
-    opacity: 0.45;
+  @keyframes wb-blink {
+    to {
+      visibility: hidden;
+    }
   }
-  50% {
-    opacity: 1;
-  }
-}
 
-/* Indigo highlight around the preview while a build is running (ux §6.1) */
-.wb-preview-active {
-  animation: wb-preview-pulse 2s ease-in-out infinite;
-}
-
-@keyframes wb-preview-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 3px rgb(79 70 229 / 0.25);
+  /*
+   * Status line glimmer (ux §2 "思考中的微光"): a soft highlight sweeps across
+   * the text. Falls back to plain muted text under reduced motion.
+   */
+  .wb-glimmer {
+    color: var(--color-zinc-500);
+    background-image: linear-gradient(
+      100deg,
+      var(--color-zinc-500) 0%,
+      var(--color-zinc-500) 40%,
+      var(--color-zinc-900) 50%,
+      var(--color-zinc-500) 60%,
+      var(--color-zinc-500) 100%
+    );
+    background-size: 220% 100%;
+    background-position: 100% 0;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: wb-glimmer 2.2s linear infinite;
   }
-  50% {
-    box-shadow: 0 0 0 5px rgb(79 70 229 / 0.1);
-  }
-}
 
-@media (prefers-reduced-motion: reduce) {
-  .wb-cursor,
-  .wb-shimmer,
-  .wb-preview-active,
-  .wb-root .animate-spin {
-    animation: none;
+  @keyframes wb-glimmer {
+    to {
+      background-position: -120% 0;
+    }
+  }
+
+  /* Live preview frame while a build is running (ux §6.1 "正在跟随智能体"). */
+  .wb-frame {
+    box-shadow: var(--shadow-raised);
+    transition: box-shadow 200ms ease-out;
+  }
+
+  .wb-frame-live {
+    box-shadow:
+      0 0 0 1.5px var(--color-indigo-500),
+      0 0 0 6px rgb(99 102 241 / 0.12),
+      0 18px 40px -16px rgb(67 56 202 / 0.35);
+    animation: wb-frame-breathe 2.4s ease-in-out infinite;
+  }
+
+  @keyframes wb-frame-breathe {
+    0%,
+    100% {
+      box-shadow:
+        0 0 0 1.5px var(--color-indigo-500),
+        0 0 0 6px rgb(99 102 241 / 0.12),
+        0 18px 40px -16px rgb(67 56 202 / 0.35);
+    }
+    50% {
+      box-shadow:
+        0 0 0 1.5px var(--color-indigo-500),
+        0 0 0 3px rgb(99 102 241 / 0.06),
+        0 18px 40px -16px rgb(67 56 202 / 0.25);
+    }
+  }
+
+  /* Indeterminate progress line along the top edge of the live frame. */
+  .wb-progress {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 2px;
+    overflow: hidden;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .wb-progress::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 35%;
+    left: -35%;
+    background: linear-gradient(90deg, transparent, var(--color-indigo-500), transparent);
+    animation: wb-progress 1.8s ease-in-out infinite;
+  }
+
+  @keyframes wb-progress {
+    to {
+      left: 100%;
+    }
+  }
+
+  /*
+   * Build rail (the signature): steps hang off a thin vertical line like atoms
+   * on a bond. Each `.wb-rail-item` draws the segment above and below its node,
+   * so nested rails (phase 2: steps under a dispatch row) can reuse it.
+   */
+  .wb-rail {
+    position: relative;
+  }
+
+  .wb-rail-item {
+    position: relative;
+  }
+
+  .wb-rail-item::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--rail-x, 19px) - 0.5px);
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--color-zinc-200);
+  }
+
+  /* Rails start and end at the node centre (row padding 5px + node 8px). */
+  .wb-rail-item:first-child::before {
+    top: var(--rail-node-y, 13px);
+  }
+
+  .wb-rail-item:last-child::before {
+    bottom: auto;
+    height: var(--rail-node-y, 13px);
+  }
+
+  .wb-rail-item:only-child::before {
+    display: none;
+  }
+
+  .wb-rail-node {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    background: var(--color-white);
+  }
+
+  /* Entrance for freshly streamed steps and blocks. */
+  .wb-enter {
+    animation: wb-enter 180ms ease-out both;
+  }
+
+  @keyframes wb-enter {
+    from {
+      opacity: 0;
+      transform: translateY(3px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wb-cursor,
+    .wb-frame-live,
+    .wb-enter,
+    .wb-root .animate-spin {
+      animation: none;
+    }
+    .wb-glimmer {
+      animation: none;
+      background: none;
+      -webkit-text-fill-color: currentColor;
+    }
+    .wb-progress {
+      display: none;
+    }
   }
 }

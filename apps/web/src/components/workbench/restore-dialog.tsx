@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle } from "lucide-react";
+import { History, LoaderCircle } from "lucide-react";
 
 import {
   AlertDialog,
@@ -33,17 +33,27 @@ export function RestoreDialog({ target, busy, error, onCancel, onConfirm }: Rest
     <AlertDialog open={target !== null} onOpenChange={(open) => !open && !busy && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader>
+          <span
+            aria-hidden="true"
+            className="mb-1 flex size-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-500/15"
+          >
+            <History className="size-5" />
+          </span>
           <AlertDialogTitle>恢复到版本 {target?.number}？</AlertDialogTitle>
           <AlertDialogDescription>
             当前代码会回到版本 {target?.number} 的样子，应用里的数据不变。会生成新的版本 {target?.nextNumber}。
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {error && <p className="text-xs text-red-600">{error}</p>}
+        {error && (
+          <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </p>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy}>取消</AlertDialogCancel>
-          <Button type="button" onClick={onConfirm} disabled={busy} className="rounded-xl bg-indigo-600 text-white hover:bg-indigo-600/90">
+          <Button type="button" onClick={onConfirm} disabled={busy} aria-busy={busy}>
             {busy && <LoaderCircle className="size-3.5 animate-spin" />}
-            恢复
+            {busy ? "恢复中…" : "恢复"}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

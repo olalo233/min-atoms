@@ -28,7 +28,7 @@ async function loadScenario(scenario: string): Promise<WorkbenchStore> {
 }
 
 describe("mock scenarios", () => {
-  it.each(["live", "running", "succeeded", "failed", "failed-restart", "cancelled", "queued", "env-down", "long"])(
+  it.each(["live", "running", "succeeded", "failed", "failed-restart", "cancelled", "queued", "env-down", "long", "build", "building", "stress"])(
     "scenario %s produces a valid ProjectDetail",
     async (scenario) => {
       const source = createMockSource(PROJECT_ID, scenario);
@@ -36,6 +36,20 @@ describe("mock scenarios", () => {
       expect(ProjectDetailSchema.safeParse(detail).success).toBe(true);
     },
   );
+
+  it("building scenario freezes mid-run on a running step after a failed check", async () => {
+    const store = await loadScenario("building");
+    const detail = await createMockSource(PROJECT_ID, "building").loadProject();
+    for (const event of detail.runs[0].events ?? []) {
+      expect(RunEventSchema.safeParse(event).success).toBe(true);
+    }
+    const run = Object.values(store.getSnapshot().runs)[0];
+    expect(run.phase).toBe("running");
+    expect(run.steps.length).toBeGreaterThan(6);
+    expect(run.steps.at(-1)?.status).toBe("running");
+    expect(run.steps.some((step) => step.status === "failed")).toBe(true);
+    expect(statusLineText(run, true)).toBe("正在运行 bun run check…");
+  });
 
   it("preview URL is the local mock page, never a live host", async () => {
     const source = createMockSource(PROJECT_ID, "live");

@@ -1,34 +1,109 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Check, ChevronRight, FilePen, FileText, Folder, LoaderCircle, Search, Terminal, Wrench, X } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { Check, ChevronDown, ChevronRight, FilePen, FileText, Folder, LoaderCircle, Search, Terminal, Wrench, X } from "lucide-react";
 
 import { limitLines } from "@/lib/client/format";
 import type { ToolStep } from "@/lib/client/store";
 import { cn } from "@/lib/utils";
 
 /** Tool icon per ux §9, keyed off the tool name with title fallback. */
-function toolIcon(step: ToolStep) {
+function ToolGlyph({ step, className }: { step: ToolStep; className: string }) {
   const key = `${step.name} ${step.title}`;
-  if (/读|读取|read/i.test(key)) return FileText;
-  if (/编辑|创建|写|write|edit/i.test(key)) return FilePen;
-  if (/运行|执行|run|exec|bash|command/i.test(key)) return Terminal;
-  if (/搜索|查找|search|grep|find/i.test(key)) return Search;
-  if (/查看|列|list|ls\b/i.test(key)) return Folder;
-  return Wrench;
+  if (/读|读取|read/i.test(key)) return <FileText className={className} aria-hidden="true" />;
+  if (/编辑|创建|写|write|edit/i.test(key)) return <FilePen className={className} aria-hidden="true" />;
+  if (/运行|执行|run|exec|bash|command/i.test(key)) return <Terminal className={className} aria-hidden="true" />;
+  if (/搜索|查找|search|grep|find/i.test(key)) return <Search className={className} aria-hidden="true" />;
+  if (/查看|列|list|ls\b/i.test(key)) return <Folder className={className} aria-hidden="true" />;
+  return <Wrench className={className} aria-hidden="true" />;
 }
 
-function statusIcon(step: ToolStep) {
-  if (step.status === "running") return <LoaderCircle className="size-3.5 shrink-0 animate-spin text-indigo-600" />;
-  if (step.status === "failed") return <X className="size-3.5 shrink-0 text-red-600" />;
-  return <Check className="size-3.5 shrink-0 text-zinc-400" />;
+// Titles from ux §9 are "<verb> <target>"; the target (path, command,
+// pattern, tool name) is code and is set in the mono face.
+const CODE_VERBS = new Set(["读取", "写入", "编辑", "运行", "搜索", "查找文件", "使用工具"]);
+
+export function splitStepTitle(title: string): { verb: string; target: string | null } {
+  const match = /^(\S+)\s+(.+)$/.exec(title.trim());
+  if (match && CODE_VERBS.has(match[1])) return { verb: match[1], target: match[2] };
+  return { verb: title, target: null };
+}
+
+function StepNode({ status }: { status: ToolStep["status"] }) {
+  if (status === "running") {
+    return (
+      <span className="wb-rail-node ring-1 ring-indigo-200">
+        <LoaderCircle className="size-3 animate-spin text-indigo-600" aria-label="进行中" />
+      </span>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <span className="wb-rail-node bg-red-50 ring-1 ring-red-200">
+        <X className="size-2.5 text-red-600" strokeWidth={3} aria-label="失败" />
+      </span>
+    );
+  }
+  return (
+    <span className="wb-rail-node bg-zinc-100 ring-1 ring-zinc-200">
+      <Check className="size-2.5 text-zinc-500" strokeWidth={3} aria-label="完成" />
+    </span>
+  );
+}
+
+function StepRow({ step, open, onToggle }: { step: ToolStep; open: boolean; onToggle: () => void }) {
+  const { verb, target } = splitStepTitle(step.title);
+  const failed = step.status === "failed";
+  return (
+    <li className="wb-rail-item wb-enter">
+      <button
+        type="button"
+        disabled={!step.summary}
+        onClick={onToggle}
+        aria-expanded={step.summary ? open : undefined}
+        className={cn(
+          "group/step flex w-full min-w-0 items-center gap-2.5 py-[5px] pr-3 pl-3 text-left text-[13px] disabled:cursor-default",
+          step.summary && "hover:bg-zinc-950/[0.025]",
+        )}
+      >
+        <StepNode status={step.status} />
+        <ToolGlyph step={step} className={cn("size-3.5 shrink-0", failed ? "text-red-400" : "text-zinc-400")} />
+        <span className={cn("min-w-0 flex-1 truncate", failed ? "text-red-700" : "text-zinc-700")}>
+          {target ? (
+            <>
+              <span className={failed ? "text-red-600" : "text-zinc-500"}>{verb}</span>{" "}
+              <span className="font-mono text-[12.5px]">{target}</span>
+            </>
+          ) : (
+            verb
+          )}
+        </span>
+        {step.summary && (
+          <ChevronDown
+            aria-hidden="true"
+            className={cn(
+              "size-3.5 shrink-0 text-zinc-300 transition-transform duration-150 group-hover/step:text-zinc-500",
+              open && "rotate-180",
+            )}
+          />
+        )}
+      </button>
+      {open && step.summary && (
+        <pre className="mr-3 mb-1.5 ml-[46px] max-h-52 overflow-auto rounded-lg bg-zinc-50 px-2.5 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap text-zinc-600 ring-1 ring-zinc-950/[0.05] [overflow-wrap:anywhere]">
+          {limitLines(step.summary, 10)}
+        </pre>
+      )}
+    </li>
+  );
 }
 
 const VISIBLE_WHILE_RUNNING = 6;
+// Rail centre: row padding (12px) + half the 16px node.
+const RAIL_STYLE = { "--rail-x": "20px" } as CSSProperties;
 
 /**
- * Collapsible "工作过程" list (ux §6.2): expanded while running with the
- * latest steps visible; folds to a single summary line when the run ends.
+ * Collapsible "工作过程" (ux §6.2) drawn as the build rail: expanded while
+ * running with the latest steps visible; folds to one summary line when the
+ * run ends. Phase 2 nests a second rail under each dispatch row.
  */
 export function StepList({ steps, running, durationText }: { steps: ToolStep[]; running: boolean; durationText: string | null }) {
   const [expanded, setExpanded] = useState(running);
@@ -59,55 +134,40 @@ export function StepList({ steps, running, durationText }: { steps: ToolStep[]; 
   const meta = [`已处理 ${steps.length} 步`, !running && durationText ? `用时 ${durationText}` : null].filter(Boolean).join(" · ");
 
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white text-sm">
+    <div className="overflow-hidden rounded-xl bg-white shadow-[var(--shadow-card)]">
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="flex w-full items-center gap-1.5 px-3 py-2 text-left"
+        className="press flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left hover:bg-zinc-950/[0.02]"
         aria-expanded={expanded}
       >
-        <ChevronRight className={cn("size-3.5 shrink-0 text-zinc-400 transition-transform duration-150", expanded && "rotate-90")} />
-        <span className="font-medium text-zinc-700">工作过程</span>
-        <span className="ml-auto shrink-0 text-xs text-zinc-400">{meta}</span>
+        <ChevronRight
+          aria-hidden="true"
+          className={cn("size-3.5 shrink-0 text-zinc-400 transition-transform duration-150", expanded && "rotate-90")}
+        />
+        <span className="shrink-0 text-[13px] font-medium text-zinc-800">工作过程</span>
+        <span className="min-w-0 flex-1 truncate text-right text-xs text-zinc-400 tabular-nums">{meta}</span>
       </button>
       {expanded && (
-        <ul className="border-t border-zinc-100 py-1">
+        <ol className="wb-rail border-t border-zinc-950/[0.05] py-1" style={RAIL_STYLE} aria-label="工作步骤">
           {hiddenCount > 0 && (
-            <li>
+            <li className="wb-rail-item">
               <button
                 type="button"
                 onClick={() => setShowOlder(true)}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-400 hover:text-zinc-600"
+                className="flex w-full items-center gap-2.5 py-[5px] pr-3 pl-3 text-left text-xs text-zinc-400 hover:text-zinc-700"
               >
+                <span className="wb-rail-node">
+                  <span className="size-1 rounded-full bg-zinc-300" />
+                </span>
                 更早的 {hiddenCount} 步
               </button>
             </li>
           )}
-          {visibleSteps.map((step) => {
-            const ToolIcon = toolIcon(step);
-            const open = openSteps.has(step.toolCallId);
-            return (
-              <li key={step.toolCallId}>
-                <button
-                  type="button"
-                  disabled={!step.summary}
-                  onClick={() => toggleStep(step.toolCallId)}
-                  className={cn("flex w-full items-center gap-2 px-3 py-1.5 text-left", step.summary && "hover:bg-zinc-50")}
-                  aria-expanded={step.summary ? open : undefined}
-                >
-                  {statusIcon(step)}
-                  <ToolIcon className="size-3.5 shrink-0 text-zinc-400" />
-                  <span className={cn("min-w-0 flex-1 truncate", step.status === "failed" ? "text-red-600" : "text-zinc-700")}>{step.title}</span>
-                </button>
-                {open && step.summary && (
-                  <pre className="mx-3 mb-2 max-h-52 overflow-auto rounded-lg bg-zinc-50 p-2 font-mono text-xs leading-relaxed whitespace-pre-wrap text-zinc-600">
-                    {limitLines(step.summary, 10)}
-                  </pre>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+          {visibleSteps.map((step) => (
+            <StepRow key={step.toolCallId} step={step} open={openSteps.has(step.toolCallId)} onToggle={() => toggleStep(step.toolCallId)} />
+          ))}
+        </ol>
       )}
     </div>
   );

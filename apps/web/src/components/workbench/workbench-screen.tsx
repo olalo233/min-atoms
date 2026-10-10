@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { VersionDTO } from "@min-atoms/protocol";
+import { ArrowLeft, FolderX } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { createApiSource } from "@/lib/client/api";
 import { createMockSource } from "@/lib/client/mock";
 import type { RunMode, WorkbenchSource } from "@/lib/client/source";
@@ -19,6 +21,7 @@ import { cn } from "@/lib/utils";
 
 import { ConversationPane } from "./conversation-pane";
 import { PreviewPane } from "./preview-pane";
+import { WorkbenchTopBar, type WorkbenchTab } from "./project-header";
 import { RestoreDialog, type RestoreTarget } from "./restore-dialog";
 import { WorkbenchSkeleton } from "./workbench-skeleton";
 
@@ -37,7 +40,7 @@ export function WorkbenchScreen({ projectId }: { projectId: string }) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const router = useRouter();
 
-  const [mobileTab, setMobileTab] = useState<"chat" | "preview">("chat");
+  const [mobileTab, setMobileTab] = useState<WorkbenchTab>("chat");
   // Explicit "own send" signal for MessageList: sending while scrolled up
   // jumps to the bottom (ux 6.3); streamed updates alone never steal scroll.
   const [sendSignal, setSendSignal] = useState(0);
@@ -166,11 +169,17 @@ export function WorkbenchScreen({ projectId }: { projectId: string }) {
   if (state.status === "loading") return <WorkbenchSkeleton />;
   if (state.status === "error") {
     return (
-      <div className="wb-root flex h-dvh flex-col items-center justify-center gap-3 bg-zinc-100">
-        <p className="text-sm text-zinc-600">项目加载失败或不存在</p>
-        <button type="button" onClick={() => router.push("/")} className="text-sm font-medium text-indigo-600 hover:underline">
+      <div className="wb-root bench-mat flex h-dvh flex-col items-center justify-center gap-4 px-6 text-center">
+        <span className="flex size-12 items-center justify-center rounded-2xl bg-white text-zinc-400 shadow-[var(--shadow-card)]">
+          <FolderX className="size-6" aria-hidden="true" />
+        </span>
+        <p className="text-[15px] font-medium text-zinc-700" role="alert">
+          项目加载失败或不存在
+        </p>
+        <Button type="button" variant="outline" size="sm" onClick={() => router.push("/")}>
+          <ArrowLeft className="size-3.5" aria-hidden="true" />
           返回首页
-        </button>
+        </Button>
       </div>
     );
   }
@@ -189,30 +198,21 @@ export function WorkbenchScreen({ projectId }: { projectId: string }) {
     onRestoreRequest: handleRestoreRequest,
   };
 
+  const building = activeRun?.mode === "build";
+
   return (
-    <div className="wb-root flex h-dvh flex-col overflow-hidden bg-zinc-100 text-zinc-900">
-      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-zinc-200 bg-white px-2 lg:hidden">
-        {(
-          [
-            { key: "chat", label: "对话" },
-            { key: "preview", label: "预览" },
-          ] as const
-        ).map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setMobileTab(tab.key)}
-            aria-pressed={mobileTab === tab.key}
-            className={cn(
-              "rounded-xl px-3 py-1.5 text-sm transition-colors",
-              mobileTab === tab.key ? "bg-zinc-100 font-medium text-zinc-900" : "text-zinc-500",
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      <div className="flex min-h-0 flex-1">
+    <div className="wb-root flex h-dvh flex-col overflow-hidden bg-white text-zinc-900">
+      <WorkbenchTopBar
+        className="lg:hidden"
+        projectName={state.projectName}
+        deleteBlocked={blocked}
+        onBack={() => router.push("/")}
+        onDelete={handleDelete}
+        tab={mobileTab}
+        onTabChange={setMobileTab}
+        previewLive={building}
+      />
+      <main id="main-content" className="flex min-h-0 min-w-0 flex-1">
         <ConversationPane
           className={cn(mobileTab === "chat" ? "flex" : "hidden", "lg:flex")}
           state={state}
@@ -233,14 +233,14 @@ export function WorkbenchScreen({ projectId }: { projectId: string }) {
           previewUrl={state.previewUrl}
           previewReady={state.previewReady}
           previewKey={state.previewKey}
-          running={activeRun?.mode === "build"}
+          running={building}
           versions={state.versions}
           currentVersionId={state.currentVersionId}
           restoreBlocked={blocked}
           onRefresh={() => store.refreshPreview()}
           onRestoreRequest={(version) => handleRestoreRequest(version.id)}
         />
-      </div>
+      </main>
       <RestoreDialog
         target={restoreTarget}
         busy={restoreBusy}
