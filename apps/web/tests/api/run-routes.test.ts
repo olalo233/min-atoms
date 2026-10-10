@@ -9,6 +9,11 @@ import {
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 
+vi.mock("@/lib/server/screening", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server/screening")>();
+  return { ...actual, screenInput: vi.fn(async () => ({ verdict: "allow", category: "benign", scores: { harmful_app: 0, platform_attack: 0 } })) };
+});
+
 vi.mock("@/lib/db/client", async () => {
   const { testDb } = await import("./harness");
   return { getDb: () => testDb(), closeDatabase: async () => {} };

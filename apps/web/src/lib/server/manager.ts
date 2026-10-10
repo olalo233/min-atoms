@@ -1,4 +1,9 @@
 import {
+  ManagerSteerRequestSchema,
+  ManagerSteerResponseSchema,
+  ManagerSuspendRequestSchema,
+  ManagerSuspendResponseSchema,
+  type ManagerSteerRequest,
   ManagerAbortRequestSchema,
   ManagerAbortResponseSchema,
   ManagerDeleteResponseSchema,
@@ -16,6 +21,8 @@ import {
 // /api/vm probes /health with 3 s, ensure and restore run inside the request.
 export const MANAGER_TIMEOUTS = {
   health: 3_000,
+  steer: 3_000,
+  suspend: 60_000,
   kick: 5_000,
   abort: 10_000,
   ensure: 60_000,
@@ -96,6 +103,16 @@ export class ManagerClient {
   async restore(projectId: string, versionId: string, timeoutMs: number = MANAGER_TIMEOUTS.restore): Promise<VersionDTO> {
     const body = ManagerRestoreRequestSchema.parse({ versionId });
     return this.sendJson(`/projects/${projectId}/restore`, jsonRequest("POST", body), timeoutMs, ManagerRestoreResponseSchema);
+  }
+
+  async steer(projectId: string, runId: string, input: ManagerSteerRequest, timeoutMs: number = MANAGER_TIMEOUTS.steer): Promise<boolean> {
+    const body = ManagerSteerRequestSchema.parse(input);
+    const result = await this.sendJson(`/projects/${projectId}/runs/${runId}/steer`, jsonRequest("POST", body), timeoutMs, ManagerSteerResponseSchema);
+    return result.accepted;
+  }
+
+  async suspend(projectId: string, timeoutMs: number = MANAGER_TIMEOUTS.suspend): Promise<void> {
+    await this.sendJson(`/projects/${projectId}/suspend`, jsonRequest("POST", ManagerSuspendRequestSchema.parse({})), timeoutMs, ManagerSuspendResponseSchema);
   }
 
   async removeProject(projectId: string, timeoutMs: number = MANAGER_TIMEOUTS.removeProject): Promise<void> {

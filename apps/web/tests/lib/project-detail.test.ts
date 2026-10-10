@@ -18,6 +18,7 @@ function makeDetail(id: string): ProjectDetail {
     runs: [],
     versions: [],
     lastEventId: 0,
+    accountSuspended: false,
   };
 }
 

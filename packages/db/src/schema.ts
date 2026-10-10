@@ -10,6 +10,8 @@ export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   username: text("username").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+  suspendedReason: text("suspended_reason"),
   createdAt: createdAt(),
 });
 
@@ -36,6 +38,23 @@ export const projects = pgTable("projects", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export type MessageAnnotation = {
+  route: string; tag: string; text: string; selector: string;
+  component?: string; source?: string;
+  rect: { x: number; y: number; w: number; h: number };
+};
+
+export const screeningEvents = pgTable("screening_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+  kind: text("kind").$type<"new_project" | "message">().notNull(),
+  category: text("category").notNull(),
+  scores: jsonb("scores").$type<{ harmful_app: number; platform_attack: number }>().notNull(),
+  excerpt: text("excerpt").notNull(),
+  createdAt: createdAt(),
+}, (table) => [index("screening_events_user_created_idx").on(table.userId, table.createdAt)]).enableRLS();
+
 export const messages = pgTable("messages", {
   id: uuid("id").defaultRandom().primaryKey(),
   projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
@@ -43,6 +62,7 @@ export const messages = pgTable("messages", {
   role: text("role").$type<"user" | "assistant">().notNull(),
   mode: text("mode").$type<"chat" | "build">().notNull(),
   content: text("content").notNull(),
+  annotation: jsonb("annotation").$type<MessageAnnotation>(),
   runId: uuid("run_id").references((): AnyPgColumn => runs.id, { onDelete: "set null" }),
   versionId: uuid("version_id").references((): AnyPgColumn => versions.id, { onDelete: "set null" }),
   createdAt: createdAt(),
@@ -99,3 +119,5 @@ export type Message = typeof messages.$inferSelect;
 export type Run = typeof runs.$inferSelect;
 export type RunEventRecord = typeof runEvents.$inferSelect;
 export type Version = typeof versions.$inferSelect;
+
+export type ScreeningEvent = typeof screeningEvents.$inferSelect;

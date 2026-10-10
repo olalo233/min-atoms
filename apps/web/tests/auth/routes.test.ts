@@ -77,6 +77,8 @@ describe("authentication route behavior", () => {
       createdAt: new Date("2026-07-26T00:00:00.000Z"),
       id: "user-1",
       passwordHash: "bcrypt-hash-is-never-returned",
+      suspendedAt: null,
+      suspendedReason: null,
       username: "demo",
     });
     mockedCreateSession.mockResolvedValue("opaque-session-token");

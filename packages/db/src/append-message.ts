@@ -3,7 +3,7 @@ import type { PgQueryResultHKT, PgTransaction } from "drizzle-orm/pg-core";
 import * as schema from "./schema";
 import { messages, projects } from "./schema";
 
-export type NewMessage = Pick<typeof messages.$inferInsert, "role" | "mode" | "content" | "runId" | "versionId">;
+export type NewMessage = Pick<typeof messages.$inferInsert, "role" | "mode" | "content" | "runId" | "versionId" | "annotation">;
 
 // Must be called inside the caller's transaction. Locking the project serializes
 // every message writer, including an empty conversation's first insertion.

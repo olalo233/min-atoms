@@ -37,3 +37,11 @@ export function managerFailure(error: unknown) {
   }
   throw error;
 }
+
+export function safetyError(status: number, error: string, message: string) {
+  return NextResponse.json({ error, message }, { status });
+}
+
+export function accountSuspended() {
+  return safetyError(403, "account_suspended", "账号因多次违规已暂停使用");
+}

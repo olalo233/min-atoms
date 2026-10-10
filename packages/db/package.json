@@ -13,7 +13,8 @@
     "test": "bun test tests",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/migrate.ts",
-    "db:seed": "bun src/seed.ts"
+    "db:seed": "bun src/seed.ts",
+    "admin:unsuspend": "bun src/unsuspend.ts"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",

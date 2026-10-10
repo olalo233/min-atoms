@@ -6,8 +6,10 @@ import {
   runEvents,
   runs,
   versions,
+  users,
 } from "@min-atoms/db";
 import type {
+  Annotation,
   MessageDTO,
   ProjectDetail,
   ProjectSummary,
@@ -121,7 +123,10 @@ export async function getProjectDetail(projectId: string, ownerId: string): Prom
         }
       }
 
+      const [owner] = await tx.select({ suspendedAt: users.suspendedAt }).from(users).where(eq(users.id, ownerId));
+
       return {
+        accountSuspended: Boolean(owner.suspendedAt),
         id: project.id,
         name: project.name,
         previewLabel: project.previewLabel,
@@ -184,35 +189,40 @@ export async function createProjectWithRun(input: {
   });
 }
 
-/** Queues a user message and its run. Never calls the manager, so a stopped VM still accepts messages. */
+/** Persist first, then steer an active build or queue a new run as P3 §4 specifies. */
 export async function appendUserMessageAndRun(input: {
   projectId: string;
   content: string;
   mode: RunMode;
-}): Promise<{ message: MessageDTO; run: RunDTO }> {
+  annotation?: Annotation;
+  steer: (runId: string, messageId: string) => Promise<boolean>;
+}): Promise<{ message: MessageDTO; run: RunDTO | null; steered: boolean }> {
+  const message = await getDb().transaction((tx) => appendMessage(tx, input.projectId, {
+    role: "user", mode: input.mode, content: input.content, annotation: input.annotation,
+    runId: null, versionId: null,
+  }));
+  if (input.mode === "build") {
+    const [active] = await getDb().select({ id: runs.id }).from(runs).where(and(
+      eq(runs.projectId, input.projectId), eq(runs.status, "running"), eq(runs.mode, "build"),
+    )).limit(1);
+    let accepted = false;
+    if (active) {
+      try { accepted = await input.steer(active.id, message.id); } catch { /* Queue on manager failure. */ }
+    }
+    if (accepted) {
+      const [linked] = await getDb().update(messages).set({ runId: active.id })
+        .where(eq(messages.id, message.id)).returning();
+      return { message: toMessageDTO(linked), run: null, steered: true };
+    }
+  }
   return getDb().transaction(async (tx) => {
-    const message = await appendMessage(tx, input.projectId, {
-      role: "user",
-      mode: input.mode,
-      content: input.content,
-      runId: null,
-      versionId: null,
-    });
-    const [run] = await tx
-      .insert(runs)
-      .values({
-        projectId: input.projectId,
-        userMessageId: message.id,
-        mode: input.mode,
-        status: "queued",
-      })
-      .returning();
-    const [linked] = await tx
-      .update(messages)
-      .set({ runId: run.id })
-      .where(eq(messages.id, message.id))
-      .returning();
-    return { message: toMessageDTO(linked), run: toRunDTO(run, []) };
+    await tx.select({ id: projects.id }).from(projects).where(eq(projects.id, input.projectId)).for("update");
+    const [run] = await tx.insert(runs).values({
+      projectId: input.projectId, userMessageId: message.id, mode: input.mode, status: "queued",
+    }).returning();
+    const [linked] = await tx.update(messages).set({ runId: run.id })
+      .where(eq(messages.id, message.id)).returning();
+    return { message: toMessageDTO(linked), run: toRunDTO(run, []), steered: false };
   });
 }
 

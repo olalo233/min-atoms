@@ -13,7 +13,7 @@ type RunStatus = RunDTO["status"];
 const TERMINAL_RUN_STATUSES = new Set<RunStatus>(["succeeded", "failed", "cancelled"]);
 // A finished run's prose lives in the assistant message, so its transient stream
 // events are not replayed on reload (architecture.md §10).
-const TERMINAL_EVENT_KINDS = new Set<RunEvent["kind"]>(["tool", "version", "error"]);
+const TERMINAL_EVENT_KINDS = new Set<RunEvent["kind"]>(["tool", "version", "error", "agent", "steer"]);
 
 export function toIso(value: Date | null): string | null {
   return value ? value.toISOString() : null;
@@ -26,6 +26,7 @@ export function toMessageDTO(row: Message): MessageDTO {
     role: row.role,
     mode: row.mode,
     content: row.content,
+    annotation: row.annotation,
     runId: row.runId,
     versionId: row.versionId,
     createdAt: row.createdAt.toISOString(),
@@ -52,7 +53,8 @@ export function filterRunEvents(status: RunStatus, events: RunEvent[]): RunEvent
   if (!TERMINAL_RUN_STATUSES.has(status)) {
     return events;
   }
-  return events.filter((event) => TERMINAL_EVENT_KINDS.has(event.kind));
+  const lastPlan = events.findLast((event) => event.kind === "plan");
+  return events.filter((event) => TERMINAL_EVENT_KINDS.has(event.kind) || event === lastPlan);
 }
 
 export function toRunDTO(row: Run, events: RunEvent[]): RunDTO {

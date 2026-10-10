@@ -1,3 +1,5 @@
+import { checkUserInput } from "@/lib/server/input-safety";
+import { accountSuspended } from "@/lib/server/http";
 import { WebCreateProjectRequestSchema, type ProjectSummary } from "@min-atoms/protocol";
 import { NextResponse } from "next/server";
 
@@ -25,6 +27,7 @@ export async function POST(request: Request) {
   if (!user) {
     return unauthorized();
   }
+  if (user.suspendedAt) return accountSuspended();
 
   let payload: unknown;
   try {
@@ -42,6 +45,9 @@ export async function POST(request: Request) {
   if (!prompt) {
     return jsonError(400, "Describe what you want to build.");
   }
+  const rejection = await checkUserInput(user.id, { kind: "new_project", content: prompt });
+  if (rejection) return rejection;
+
   const name = prompt.replace(/\s+/g, " ").slice(0, MAX_PROJECT_NAME_LENGTH);
 
   let created: { id: string; previewLabel: string };

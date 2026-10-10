@@ -1,3 +1,4 @@
+import { accountSuspended } from "@/lib/server/http";
 import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth/session";
@@ -15,6 +16,7 @@ export async function POST(_request: Request, context: RouteContext) {
   if (!user) {
     return unauthorized();
   }
+  if (user.suspendedAt) return accountSuspended();
 
   const { id, versionId } = await context.params;
   if (!isUuid(id) || !isUuid(versionId)) {

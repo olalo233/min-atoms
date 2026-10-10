@@ -1,3 +1,4 @@
+import { accountSuspended } from "@/lib/server/http";
 import { signSseToken } from "@min-atoms/protocol";
 import { NextResponse } from "next/server";
 
@@ -16,6 +17,7 @@ export async function GET(_request: Request, context: RouteContext) {
   if (!user) {
     return unauthorized();
   }
+  if (user.suspendedAt) return accountSuspended();
 
   const { id } = await context.params;
   if (!isUuid(id)) {

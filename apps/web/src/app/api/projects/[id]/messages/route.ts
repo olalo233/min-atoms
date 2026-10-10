@@ -1,3 +1,6 @@
+import { checkUserInput } from "@/lib/server/input-safety";
+import { getManagerClient, MANAGER_TIMEOUTS } from "@/lib/server/manager";
+import { accountSuspended } from "@/lib/server/http";
 import { WebCreateMessageRequestSchema } from "@min-atoms/protocol";
 import { NextResponse } from "next/server";
 
@@ -15,6 +18,7 @@ export async function POST(request: Request, context: RouteContext) {
   if (!user) {
     return unauthorized();
   }
+  if (user.suspendedAt) return accountSuspended();
 
   const { id } = await context.params;
   if (!isUuid(id)) {
@@ -38,14 +42,21 @@ export async function POST(request: Request, context: RouteContext) {
     return notFound("Project");
   }
 
-  // Writing the message and its queued run never touches the manager, so a
-  // stopped VM still accepts messages; they start when the environment is back.
-  const { message, run } = await appendUserMessageAndRun({
+  const rejection = await checkUserInput(user.id, {
+    kind: "message", content: parsed.data.content, annotation: parsed.data.annotation,
+  }, id);
+  if (rejection) return rejection;
+
+  const result = await appendUserMessageAndRun({
     projectId: id,
     content: parsed.data.content,
     mode: parsed.data.mode,
+    annotation: parsed.data.annotation,
+    steer: (runId, messageId) => getManagerClient().steer(id, runId, {
+      messageId, content: parsed.data.content, annotation: parsed.data.annotation,
+    }, MANAGER_TIMEOUTS.steer),
   });
 
-  scheduleKick(id, project.previewLabel);
-  return NextResponse.json({ message, run }, { status: 201 });
+  if (!result.steered) scheduleKick(id, project.previewLabel);
+  return NextResponse.json(result, { status: 201 });
 }
