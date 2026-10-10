@@ -8,6 +8,19 @@ import { defineConfig } from "vite";
 // Do not change the server options: ports and host rules are fixed.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  optimizeDeps: {
+    include: [
+      "react",
+      "react-dom",
+      "react-dom/client",
+      "lucide-react",
+      "sonner",
+      "clsx",
+      "tailwind-merge",
+      "class-variance-authority",
+      "radix-ui",
+    ],
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
