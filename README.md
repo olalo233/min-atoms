@@ -9,10 +9,14 @@ It is a demo, not a product: one built-in account, a small invited audience,
 development servers, and a manually operated VM. See
 [Demo boundaries](#demo-boundaries).
 
-Status: the core loop — sign-in, project creation, build/chat runs,
-persistence, live preview, and restore — has been verified end to end.
-Interaction polish, final rehearsal, and final GitHub publication are still
-pending.
+Status: delivered. The core loop — sign-in, project creation, build/chat
+runs, persistence, live preview, versions, and restore — has been verified end
+to end against the production deployment with a real model. See
+[Completion and trade-offs](#completion-and-trade-offs).
+
+Live demo: <https://project-delta-seven-23.vercel.app> (the demo account is
+shared with the invitation; the VM is started on demand, see
+[Demo boundaries](#demo-boundaries)).
 
 ## How it works
 
@@ -188,6 +192,45 @@ Standard flow:
 The web app deploys separately to Vercel (`apps/web/vercel.json`: `hnd1`
 region, plus a daily `SELECT 1` keepalive cron guarded by `CRON_SECRET`).
 `deploy.sh` does not build or transfer it.
+
+## Completion and trade-offs
+
+Done:
+
+- Test-account sign-in (salted password hashes, no registration), project
+  list, create/reopen/delete.
+- Real agent builds of tools and browser games (calculator, todo list, snake
+  with Canvas/keyboard/timers) inside isolated per-project containers, with
+  live run events, a resumable SSE stream, stop, and failure feedback.
+- Build vs. Chat modes with the full multi-turn conversation as context.
+- Two kinds of persistence: control-plane data in Postgres, each generated
+  app's own SQLite data on the VM disk across code changes and restores.
+- Numbered versions with linear restore; failed runs never replace the last
+  good version.
+- Responsive UI from 360px to 1600px+: chat/preview tabs below 1024px, a
+  split workbench above, and a preview iframe that never reloads on events.
+
+Trade-offs:
+
+- A real container per project (Docker on one VM) instead of in-browser
+  sandboxes, so generated apps can use a real backend, database, and any
+  browser API. The cost is a manually operated VM and a small capacity.
+- The agent runtime is an off-the-shelf coding agent (`omp`) driven through
+  its RPC mode instead of a hand-rolled tool loop; the platform focuses on
+  isolation, run orchestration, events, and versions.
+- Generated apps run as dev servers behind a gateway for instant HMR, not as
+  production builds; the model key is injected by the gateway and never
+  enters a project container.
+
+Known limitations:
+
+- Agent self-tests can create test records in the generated app's database.
+  Platform instructions require self-tests to be read-only and to never
+  modify existing records; in the last targeted check the agent created one
+  test record and removed it by id while existing rows stayed unchanged, but
+  an earlier rehearsal also edited one existing row. This is an
+  instruction-level boundary, not enforced isolation.
+- One shared demo account and serial runs per project; see below.
 
 ## Demo boundaries
 
