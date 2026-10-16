@@ -6,7 +6,7 @@ watch it appear live in the browser, try it, and keep iterating through
 numbered versions.
 
 It is a demo, not a product: one built-in account, a small invited audience,
-development servers, and a manually operated VM. See
+development servers, and a single Spot VM. See
 [Demo boundaries](#demo-boundaries).
 
 Status: delivered. The core loop — sign-in, project creation, build/chat
@@ -62,6 +62,8 @@ Two data stores, deliberately separate:
   SSE token issuing, manager client).
 - `apps/manager/` — Bun + Hono host service: containers, run queue, omp
   driver, event stream. Binds `127.0.0.1:8090`.
+- `apps/controller/` — Cloudflare Worker: authenticated VM wake/status and
+  scheduled snapshot-before-retire (see its deployment runbook).
 - `packages/protocol/` — shared zod schemas (manager API, run events, web
   DTOs, SSE token).
 - `packages/db/` — Drizzle schema, client, migrations, seed.
@@ -190,20 +192,33 @@ Standard flow:
    dedicated tunnel, each confirmed by readback.
 
 Spot preemption stops the VM and retains its disk. An in-flight run is marked
-failed on the next manager start; restart with `infra/vm/up.sh`. The VM also
-powers itself off after 30 minutes without manager use, checked every five
+failed on the next manager start. With the runtime controller and web integration
+deployed, the web app wakes it automatically; `infra/vm/up.sh` remains an
+operator fallback. The VM also
+powers itself off after 20 minutes without manager use, checked every five
 minutes. Authenticated project requests, open SSE streams and queued/running
 runs keep it active; health polling does not. Direct preview traffic and SSH
 do not reset this clock. Set `MA_IDLE_SHUTDOWN_SECONDS=0` in the VM's optional
 `/etc/min-atoms/idle.conf` to disable it. Deploy installs/enables this timer
 on restored older disks too.
 
+The [runtime controller](apps/controller/README.md) runs on workers.dev with
+no zone routes. Every ten minutes it checks whether the VM has been stopped
+for two hours, snapshots its disk, waits for `READY`, then deletes the still
+stopped VM and disk. It retains the newest two READY snapshots. A web wake
+starts a stopped VM or recreates a retired VM from the newest READY snapshot,
+including its project data and services. Deploying the controller and setting
+its dedicated service-account key and wake secret are separate operator steps.
+Idle periods retain snapshot storage cost; no VM compute or persistent boot
+disk is retained after retirement.
+
 For long idle periods, `infra/vm/archive.sh` copies only the data a rebuild
 cannot recreate (each project's Git workspace, app SQLite data and agent
 state; no dependencies, build output, image or OS) to a dedicated Cloudflare
 R2 bucket, verifies it, and stops the VM. `infra/vm/destroy.sh --vm-only
 --confirm-destroy` then snapshots the stopped disk and deletes just the VM and
-its disk, keeping the tunnel and preview hostnames. `infra/vm/up.sh
+its disk, keeps the newest two READY snapshots, and retains the tunnel and
+preview hostnames. `infra/vm/up.sh
 --from-snapshot` brings the VM back as it was; steps 2–4 plus
 `infra/vm/restore.sh` rebuild it from the R2 copy instead. Details are in
 `infra/vm/README.md`.
@@ -233,7 +248,7 @@ Trade-offs:
 
 - A real container per project (Docker on one VM) instead of in-browser
   sandboxes, so generated apps can use a real backend, database, and any
-  browser API. The cost is a manually operated VM and a small capacity.
+  browser API. The cost is a single VM and a small capacity.
 - The agent runtime is an off-the-shelf coding agent (`omp`) driven through
   its RPC mode instead of a hand-rolled tool loop; the platform focuses on
   isolation, run orchestration, events, and versions.
@@ -271,8 +286,10 @@ Known limitations:
 - **Small capacity, serial runs.** One run at a time per project; a handful
   of project containers run concurrently and the least-recently-used idle
   ones are stopped. Files persist on the VM disk.
-- **Manual lifecycle.** The operator runs `up.sh`/`down.sh`/`destroy.sh`
-  explicitly. There is no autoscaling, failover, or unattended recovery.
+- **Single-VM lifecycle.** The runtime controller supports automatic wake and
+  snapshot-before-retire once deployed and connected to the web app. Operator
+  `up.sh`/`down.sh`/`destroy.sh` remain available. There is no autoscaling or
+  failover.
 - **Key handling.** The model provider key exists only in the VM environment
   and the gateway container; the manager unit explicitly unsets
   `DEEPSEEK_API_KEY` (`UnsetEnvironment`), so neither the manager nor project

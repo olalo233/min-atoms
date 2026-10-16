@@ -2,7 +2,7 @@
 # Invoked by ma-idle.timer on the VM; uncertainty always leaves it running.
 set -euo pipefail
 [[ $EUID == 0 ]] || { printf 'Run as root on the VM.\n' >&2; exit 1; }
-threshold=${MA_IDLE_SHUTDOWN_SECONDS:-1800}
+threshold=${MA_IDLE_SHUTDOWN_SECONDS:-1200}
 [[ $threshold != 0 ]] || exit 0
 body=$(curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8090/health) || exit 0
 if bun -e '

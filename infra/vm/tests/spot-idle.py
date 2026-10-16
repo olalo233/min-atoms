@@ -52,8 +52,8 @@ class SpotIdleTest(unittest.TestCase):
         return result, calls
 
     def test_default_and_custom_threshold_boundaries(self):
-        for threshold, seconds, poweroff in ((None, 1799, False), (None, 1800, True),
-                                             (None, 1801, True), (60, 59, False), (60, 60, True)):
+        for threshold, seconds, poweroff in ((None, 1199, False), (None, 1200, True),
+                                             (None, 1201, True), (60, 59, False), (60, 60, True)):
             with self.subTest(threshold=threshold, idle=seconds):
                 result, calls = self.run_check(json.dumps({'ok': True, 'idleSeconds': seconds}), threshold)
                 self.assertEqual(['systemctl', 'poweroff'] in calls, poweroff)

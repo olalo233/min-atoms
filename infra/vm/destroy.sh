@@ -18,6 +18,28 @@ delete_vm() {
   instances=$(gcloud compute instances list --project="$MA_PROJECT" --filter="name=$MA_VM" --format=json)
   jq -e --arg name "$MA_VM" '[.[] | select(.name == $name)] | length == 0' <<< "$instances" >/dev/null || die 'VM deletion not confirmed.'
 }
+prune_snapshots() {
+  local snapshots candidates name snapshot_json remaining
+  local list_args=(--project="$MA_PROJECT" --filter='labels.app=min-atoms' --format=json)
+  snapshots=$(gcloud compute snapshots list "${list_args[@]}")
+  # Incomplete snapshots never displace a usable copy. All pages are returned by
+  # gcloud unless --limit is set; filter again locally before deleting anything.
+  candidates=$(jq -r '[.[] | select(.labels.app == "min-atoms")] |
+    sort_by(.creationTimestamp) | reverse | . as $all |
+    [.[] | select(.status == "READY")][2:][] |
+    . as $candidate | select(all($all[];
+      .status == "READY" or .creationTimestamp < $candidate.creationTimestamp)) | .name' <<< "$snapshots")
+  while IFS= read -r name; do
+    [[ -n $name ]] || continue
+    snapshot_json=$(gcloud compute snapshots describe "$name" --project="$MA_PROJECT" --format=json)
+    jq -e '.status == "READY" and .labels.app == "min-atoms"' <<< "$snapshot_json" >/dev/null ||
+      die 'Snapshot ownership or readiness changed; pruning stopped.'
+    gcloud compute snapshots delete "$name" --project="$MA_PROJECT" --quiet
+    remaining=$(gcloud compute snapshots list "${list_args[@]}")
+    jq -e --arg name "$name" 'all(.[]; .name != $name)' <<< "$remaining" >/dev/null ||
+      die 'Snapshot deletion not confirmed.'
+  done <<< "$candidates"
+}
 # Retirement for long idle periods: snapshot the stopped disk, then delete only
 # the VM and its disk. Tunnel, DNS and preview hostnames stay for
 # up.sh --from-snapshot, or for restore.sh from the portable R2 data archive.
@@ -31,6 +53,8 @@ if "$vm_only"; then
     printf 'Read back the snapshot: READY, from this disk, labeled app=min-atoms.\n'
     print_command gcloud compute instances delete "$MA_VM" --project="$MA_PROJECT" --zone="$MA_ZONE" --quiet
     printf 'Read back instance and disk lists; tunnel and DNS are kept.\n'
+    print_command gcloud compute snapshots list --project="$MA_PROJECT" --filter='labels.app=min-atoms' --format=json
+    printf 'Keep newest 2 READY app=min-atoms snapshots; delete older READY copies only when no newer snapshot is incomplete; read back every deletion.\n'
     exit 0
   fi
   require_owned_vm
@@ -53,6 +77,7 @@ if "$vm_only"; then
   delete_vm
   disks=$(gcloud compute disks list --project="$MA_PROJECT" --filter="name=$MA_VM" --format=json)
   jq -e 'length == 0' <<< "$disks" >/dev/null || die 'Boot disk still exists; check it before deleting manually.'
+  prune_snapshots
   printf 'Snapshot %s kept; VM and disk deleted; tunnel and DNS kept. Revive: infra/vm/up.sh --from-snapshot\n' "$snapshot"
   exit 0
 fi

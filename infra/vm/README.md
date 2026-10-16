@@ -83,9 +83,9 @@ Git/Jujutsu metadata and .env files are excluded. Private env/key updates travel
 as one env payload on SSH stdin. Deployment does not build or transfer the web app.
 Deployment also installs/enables the idle units, including on older restored disks.
 
-The VM powers itself off after 30 minutes without manager activity, checked
+The VM powers itself off after 20 minutes without manager activity, checked
 every five minutes starting 15 minutes after boot (so shutdown normally occurs
-30–35 minutes after last use). Manager start, authenticated `/projects/*`
+20–25 minutes after last use). Manager start, authenticated `/projects/*`
 requests, SSE open/close and run completion reset the idle clock. Any queued
 or running run or open SSE stream keeps `/health`'s `idleSeconds` at zero.
 Health polling does not reset it. A failed health check, invalid JSON or missing
@@ -94,7 +94,20 @@ traffic and SSH sessions do not count as activity.
 To override the default, set `MA_IDLE_SHUTDOWN_SECONDS=<seconds>` in the
 optional `/etc/min-atoms/idle.conf` (systemd EnvironmentFile syntax); `0`
 disables idle shutdown. The idle service reads no private manager environment.
-Automatic poweroff keeps the disk and project data; restart with `up.sh`.
+Automatic poweroff keeps the disk and project data. Once the
+[runtime controller](../../apps/controller/README.md) and web integration are
+deployed, the web app requests wake automatically; `up.sh` remains the operator
+fallback for a stopped VM.
+
+The controller checks every ten minutes. After the VM has been stopped for two
+hours, it takes an `app=min-atoms` snapshot in `asia-northeast1`, waits for
+`READY` across cron ticks, and rechecks the VM's stopped state, stop timestamp,
+boot disk name and `autoDelete=true` before deleting the VM and disk. It keeps
+the newest two READY snapshots and waits to prune if a newer copy is incomplete.
+A later web wake starts a stopped VM or recreates a retired one from the newest
+READY snapshot, with the same Spot settings, SSH metadata and no service account.
+Tunnel, DNS and preview URLs stay intact. Snapshots still incur storage cost;
+idle shutdown removes compute cost, retirement removes the persistent disk cost.
 
 `down.sh` stops the VM and retains its disk. `destroy.sh --confirm-destroy` is
 only for a user-requested final teardown: it deletes the owned VM, scoped DNS
@@ -124,7 +137,9 @@ replace it, each verified before anything is deleted:
   snapshot labeled `app=min-atoms` from the disk, waits for `READY`, and only
   then deletes the VM and its disk, confirming both by readback. The tunnel,
   DNS records and preview-host pool are kept, so projects return at the same
-  URLs. Snapshots are kept; delete old ones by hand.
+  URLs. After confirming VM and disk deletion it keeps the newest two READY
+  `app=min-atoms` snapshots, pruning older READY copies with deletion readback;
+  a newer incomplete snapshot prevents pruning.
 
 To revive on GCP, `up.sh --from-snapshot` recreates the VM from the newest
 ready snapshot, fully configured, and waits for manager health. To rebuild

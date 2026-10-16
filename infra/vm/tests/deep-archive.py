@@ -26,6 +26,12 @@ def record(entry):
 assert '--project=hy2-seoul-relay-20260728' in args
 def save():
     (root / 'vm.json').write_text(json.dumps(state))
+def snapshot_info(name):
+    index = state['snapshots'].index(name)
+    return {'name': name, 'status': state.get('snapshotStatuses', {}).get(name, state['snapshotStatus']),
+            'creationTimestamp': f'2026-10-{10 + index:02d}T06:00:00Z',
+            'labels': {'app': state.get('snapshotLabels', {}).get(name, 'min-atoms')},
+            'sourceDisk': 'https://x/projects/p/zones/asia-northeast1-b/disks/min-atoms-vm'}
 if args[:3] == ['compute', 'instances', 'list']:
     print(json.dumps([] if state['deleted'] else [{'name': 'min-atoms-vm', 'status': state['status']}]))
     sys.exit()
@@ -40,14 +46,23 @@ if args[:3] == ['compute', 'snapshots', 'create']:
     save()
     sys.exit()
 if args[:3] == ['compute', 'snapshots', 'describe']:
-    assert args[3] == state['snapshots'][-1], args
-    snapshot = {'status': state['snapshotStatus'], 'labels': {'app': 'min-atoms'},
-                'sourceDisk': 'https://x/projects/p/zones/asia-northeast1-b/disks/min-atoms-vm'}
+    snapshot = snapshot_info(args[3])
     print(json.dumps(snapshot) if '--format=json' in args else snapshot['status'])
     sys.exit()
 if args[:3] == ['compute', 'snapshots', 'list']:
+    if '--format=json' in args:
+        assert '--filter=labels.app=min-atoms' in args, args
+        print(json.dumps([snapshot_info(name) for name in state['snapshots']]))
+        sys.exit()
     assert "--filter=labels.app=min-atoms AND status=READY" in args, args
     print(state['snapshots'][-1] if state['snapshots'] else '')
+    sys.exit()
+if args[:3] == ['compute', 'snapshots', 'delete']:
+    assert state['deleted'], 'pruning must follow VM deletion readback'
+    record({'tool': 'gcloud', 'op': 'prune', 'name': args[3]})
+    if not os.environ.get('MA_TEST_PRUNE_STUCK'):
+        state['snapshots'].remove(args[3])
+    save()
     sys.exit()
 assert '--zone=asia-northeast1-b' in args
 if args[:3] == ['compute', 'instances', 'create']:
@@ -262,6 +277,32 @@ class DeepArchiveTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn(b'VM and disk were kept', result.stderr)
         self.assertEqual(calls, [{'tool': 'gcloud', 'op': 'snapshot'}])
+
+    def test_vm_only_teardown_prunes_only_older_ready_owned_snapshots(self):
+        self.vm(status='TERMINATED', snapshots=['oldest', 'foreign', 'previous'],
+                snapshotLabels={'foreign': 'another-app'})
+        result, calls = self.run_script('destroy.sh', '--vm-only', '--confirm-destroy')
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertEqual(calls, [{'tool': 'gcloud', 'op': 'snapshot'}, {'tool': 'gcloud', 'op': 'delete'},
+                                 {'tool': 'gcloud', 'op': 'prune', 'name': 'oldest'}])
+        state = json.loads((self.root / 'vm.json').read_text())
+        self.assertEqual(state['snapshots'][:2], ['foreign', 'previous'])
+        self.assertEqual(len(state['snapshots']), 3)  # two owned READY copies plus foreign
+
+    def test_vm_only_prune_waits_for_newer_incomplete_snapshot(self):
+        self.vm(status='TERMINATED', snapshots=['oldest', 'previous', 'pending'],
+                snapshotStatuses={'pending': 'UPLOADING'})
+        result, calls = self.run_script('destroy.sh', '--vm-only', '--confirm-destroy')
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertEqual([call['op'] for call in calls], ['snapshot', 'delete'])
+
+    def test_vm_only_prune_requires_deletion_readback(self):
+        self.vm(status='TERMINATED', snapshots=['oldest', 'previous'])
+        self.env['MA_TEST_PRUNE_STUCK'] = '1'
+        result, calls = self.run_script('destroy.sh', '--vm-only', '--confirm-destroy')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b'Snapshot deletion not confirmed', result.stderr)
+        self.assertEqual(calls[-1], {'tool': 'gcloud', 'op': 'prune', 'name': 'oldest'})
 
     def test_vm_only_teardown_warns_when_data_archive_is_stale(self):
         self.vm(status='TERMINATED')
