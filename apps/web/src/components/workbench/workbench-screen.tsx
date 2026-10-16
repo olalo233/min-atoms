@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { VersionDTO } from "@min-atoms/protocol";
 import { ArrowLeft, FolderX } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { createApiSource } from "@/lib/client/api";
+import { startRuntimePolling } from "@/lib/client/runtime-poller";
 import { createMockSource } from "@/lib/client/mock";
 import type { RunMode, WorkbenchSource } from "@/lib/client/source";
 import {
@@ -69,45 +70,14 @@ export function WorkbenchScreen({ projectId }: { projectId: string }) {
     };
   }, [source, store]);
 
-  // VM polling (ux §7.8/§8): check every 10s; call ensure on the first "up"
-  // and again whenever the environment comes back from being down.
+  const runtimePoller = useRef<ReturnType<typeof startRuntimePolling> | null>(null);
   useEffect(() => {
     if (state.status !== "ready") return;
-    let cancelled = false;
-    let waking = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const wake = async () => {
-      if (waking) return;
-      waking = true;
-      try {
-        await source.ensure();
-        const url = await source.getPreviewUrl();
-        if (!cancelled) store.setPreviewReady(url);
-      } catch {
-        // The next poll retries the wake-up.
-      }
-      waking = false;
-    };
-    const poll = async () => {
-      let up = false;
-      try {
-        up = await source.getVmUp();
-      } catch {
-        up = false;
-      }
-      if (cancelled) return;
-      store.setVmUp(up);
-      // Retry the wake on every 10s poll while the preview is not ready: a
-      // failed ensure/getPreviewUrl must not leave the pane spinning forever.
-      // setVmUp(false) already resets previewReady, so a down->up transition
-      // re-wakes through the same condition; `waking` serializes attempts.
-      if (up && !store.getSnapshot().previewReady) void wake();
-      timer = setTimeout(() => void poll(), 10_000);
-    };
-    void poll();
+    const poller = startRuntimePolling(source, store);
+    runtimePoller.current = poller;
     return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
+      poller.stop();
+      runtimePoller.current = null;
     };
   }, [source, store, state.status]);
 
@@ -189,6 +159,7 @@ export function WorkbenchScreen({ projectId }: { projectId: string }) {
   const blocked = hasBlockingRun(state);
 
   const actions = {
+    onRuntimeRetry: () => void runtimePoller.current?.retry(),
     onRetryDraft: handleRetryDraft,
     onFix: () => void handleSend("修复上面的问题", "build"),
     onRetryRun: (run: RunViewData) => {
@@ -230,6 +201,11 @@ export function WorkbenchScreen({ projectId }: { projectId: string }) {
         <PreviewPane
           className={cn(mobileTab === "preview" ? "flex" : "hidden", "lg:flex")}
           vmUp={state.vmUp}
+          runtimePhase={state.runtimePhase}
+          runtimeDetail={state.runtimeDetail}
+          runtimeWaitingSince={state.runtimeWaitingSince}
+          runtimeWakePending={state.runtimeWakePending}
+          onRuntimeRetry={() => void runtimePoller.current?.retry()}
           previewUrl={state.previewUrl}
           previewReady={state.previewReady}
           previewKey={state.previewKey}

@@ -11,6 +11,7 @@ import { UserBubble } from "./user-bubble";
 import { VersionCard } from "./version-card";
 
 export interface MessageActions {
+  onRuntimeRetry: () => void;
   onRetryDraft: (tempId: string) => void;
   onFix: () => void;
   onRetryRun: (run: RunViewData) => void;
@@ -147,6 +148,11 @@ export function MessageList({ state, timeline, restoreBlocked, sendSignal, actio
                 finalText={item.finalText}
                 cancelledNote={cancelledNote(state, item.run)}
                 vmUp={state.vmUp}
+                runtimePhase={state.runtimePhase}
+                runtimeDetail={state.runtimeDetail}
+                runtimeWaitingSince={state.runtimeWaitingSince}
+                runtimeWakePending={state.runtimeWakePending}
+                onRuntimeRetry={actions.onRuntimeRetry}
                 currentVersionId={state.currentVersionId}
                 restoreBlocked={restoreBlocked}
                 onRestoreRequest={actions.onRestoreRequest}

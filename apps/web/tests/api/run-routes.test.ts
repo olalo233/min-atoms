@@ -444,7 +444,7 @@ describe("GET /api/vm", () => {
     const first = await getVm();
     const body = await first.json();
     expect(WebVmResponseSchema.safeParse(body).success).toBe(true);
-    expect(body).toEqual({ up: true });
+    expect(body).toEqual({ up: true, phase: "running" });
 
     await getVm();
     expect(fakeManager().health).toHaveBeenCalledTimes(1);
@@ -459,7 +459,7 @@ describe("GET /api/vm", () => {
     fakeManager().health.mockResolvedValue(false);
 
     const response = await getVm();
-    await expect(response.json()).resolves.toEqual({ up: false });
+    await expect(response.json()).resolves.toEqual({ up: false, phase: "unavailable", detail: "自动启动暂不可用，请稍后重试。" });
 
     setCurrentUser(null);
     resetVmCacheForTests();

@@ -1,29 +1,31 @@
+import type { VmStatus } from "../runtime";
+import { getControllerStatus } from "./controller";
 import { getManagerClient } from "./manager";
 
-/** /api/vm caches the manager health probe for 10 s (architecture.md §10). */
+/** Cache the complete health/controller result for 10 s (architecture §10). */
 export const VM_STATUS_CACHE_MS = 10_000;
+let cache: { key: string; value: VmStatus; expiresAt: number } | undefined;
 
-type CacheEntry = { key: string; value: boolean; expiresAt: number };
-
-let cache: CacheEntry | undefined;
-
-export async function isVmUp(now: number = Date.now()): Promise<boolean> {
-  const key = process.env.MANAGER_URL ?? "";
-  if (cache && cache.key === key && cache.expiresAt > now) {
-    return cache.value;
-  }
-
-  let value = false;
+export async function getVmStatus(now = Date.now()): Promise<VmStatus> {
+  const key = `${process.env.MANAGER_URL ?? ""}\n${process.env.CONTROLLER_URL ?? ""}\n${process.env.CONTROLLER_TOKEN ?? ""}`;
+  if (cache?.key === key && cache.expiresAt > now) return cache.value;
+  let up = false;
   try {
-    value = await getManagerClient().health();
+    up = await getManagerClient().health();
   } catch {
-    value = false;
+    // An unconfigured or unreachable manager still permits controller wake-up.
   }
-
+  const value: VmStatus = up ? { up: true, phase: "running" } : { up: false, ...await getControllerStatus() };
   cache = { key, value, expiresAt: now + VM_STATUS_CACHE_MS };
   return value;
 }
 
-export function resetVmCacheForTests(): void {
+export async function isVmUp(now = Date.now()): Promise<boolean> {
+  return (await getVmStatus(now)).up;
+}
+
+export function invalidateVmCache(): void {
   cache = undefined;
 }
+
+export const resetVmCacheForTests = invalidateVmCache;

@@ -1,5 +1,7 @@
 import type { MessageDTO, RunDTO, RunEvent, VersionDTO } from "@min-atoms/protocol";
 
+import type { RuntimeStatus, VmStatus } from "../runtime";
+
 import { loadProjectDetail } from "./project-detail";
 import { subscribeRunEvents } from "./sse";
 import type { RunMode, WorkbenchSource } from "./source";
@@ -53,7 +55,8 @@ export function createApiSource(projectId: string): WorkbenchSource {
       });
     },
 
-    getVmUp: async () => (await request<{ up: boolean }>("/api/vm")).up,
+    getVmStatus: () => request<VmStatus>("/api/vm"),
+    wakeRuntime: () => request<RuntimeStatus>("/api/vm/wake", { method: "POST" }),
 
     ensure: () => request(`${base}/ensure`, { method: "POST", body: "{}" }),
 

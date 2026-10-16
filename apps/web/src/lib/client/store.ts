@@ -1,5 +1,7 @@
 import type { MessageDTO, ProjectDetail, RunDTO, RunEvent, VersionDTO } from "@min-atoms/protocol";
 
+import { runtimeCopy, type RuntimePhase, type VmStatus } from "../runtime";
+
 import type { RunMode } from "./source";
 
 /** Granular run phase, combining the run row status with `status` events. */
@@ -71,6 +73,10 @@ export interface WorkbenchState {
   versions: VersionDTO[];
   lastEventId: number;
   vmUp: boolean | null;
+  runtimePhase: RuntimePhase | null;
+  runtimeDetail?: string;
+  runtimeWaitingSince: number | null;
+  runtimeWakePending: boolean;
   /** Set once; polling/events/version changes never rewrite it. */
   previewUrl: string | null;
   previewReady: boolean;
@@ -194,6 +200,9 @@ export class WorkbenchStore {
       versions: [],
       lastEventId: 0,
       vmUp: null,
+      runtimePhase: null,
+      runtimeWaitingSince: Date.now(),
+      runtimeWakePending: false,
       previewUrl: null,
       previewReady: false,
       previewKey: 0,
@@ -266,10 +275,19 @@ export class WorkbenchStore {
     this.emit();
   }
 
-  setVmUp(up: boolean): void {
-    if (this.state.vmUp === up) return;
-    this.state.vmUp = up;
-    if (!up) this.state.previewReady = false;
+  setVmStatus(status: VmStatus): void {
+    this.state.vmUp = status.up;
+    this.state.runtimePhase = status.phase;
+    this.state.runtimeDetail = status.detail;
+    if (!status.up) {
+      this.state.previewReady = false;
+      this.state.runtimeWaitingSince ??= Date.now();
+    }
+    this.emit();
+  }
+
+  setRuntimeWakePending(pending: boolean): void {
+    this.state.runtimeWakePending = pending;
     this.emit();
   }
 
@@ -277,6 +295,7 @@ export class WorkbenchStore {
   setPreviewReady(previewUrl: string): void {
     if (!this.state.previewUrl) this.state.previewUrl = previewUrl;
     this.state.previewReady = true;
+    this.state.runtimeWaitingSince = null;
     this.emit();
   }
 
@@ -432,11 +451,11 @@ export function hasBlockingRun(state: WorkbenchState): boolean {
 }
 
 /** Status line copy for a run (ux §6.2/§10); null hides the line. */
-export function statusLineText(run: RunViewData, vmUp: boolean | null): string | null {
+export function statusLineText(run: RunViewData, vmUp: boolean | null, runtimePhase: RuntimePhase | null = null): string | null {
   if (run.stopTimedOut && isActivePhase(run.phase)) return "正在停止…";
   switch (run.phase) {
     case "queued":
-      return vmUp === false ? "演示环境未启动，启动后自动开始" : "排队中，前一个任务完成后开始";
+      return vmUp !== true ? runtimeCopy(runtimePhase).line : "排队中，前一个任务完成后开始";
     case "starting":
       return run.statusDetail ?? "准备环境…";
     case "verifying":

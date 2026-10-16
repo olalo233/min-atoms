@@ -1,5 +1,7 @@
 import type { MessageDTO, ProjectDetail, RunDTO, RunEvent, VersionDTO } from "@min-atoms/protocol";
 
+import type { RuntimeStatus, VmStatus } from "../runtime";
+
 /** Message/run mode; protocol exports the schema but not the inferred type. */
 export type RunMode = RunDTO["mode"];
 
@@ -16,7 +18,8 @@ export interface WorkbenchSource {
    * project-level event id. Returns an unsubscribe function.
    */
   subscribe(after: number, onEvent: (id: number, event: RunEvent) => void): () => void;
-  getVmUp(): Promise<boolean>;
+  getVmStatus(): Promise<VmStatus>;
+  wakeRuntime(): Promise<RuntimeStatus>;
   /** Wake the project container; resolves once the dev server answers. */
   ensure(): Promise<unknown>;
   /** URL shown in the preview iframe; set as iframe src exactly once. */

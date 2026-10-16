@@ -28,7 +28,7 @@ async function loadScenario(scenario: string): Promise<WorkbenchStore> {
 }
 
 describe("mock scenarios", () => {
-  it.each(["live", "running", "succeeded", "failed", "failed-restart", "cancelled", "queued", "env-down", "long", "build", "building", "stress"])(
+  it.each(["live", "running", "succeeded", "failed", "failed-restart", "cancelled", "queued", "env-down", "env-checking", "env-starting", "env-restoring", "env-stopping", "env-retiring", "env-retired", "env-running", "env-error", "env-unavailable", "long", "build", "building", "stress"])(
     "scenario %s produces a valid ProjectDetail",
     async (scenario) => {
       const source = createMockSource(PROJECT_ID, scenario);
@@ -107,7 +107,7 @@ describe("WorkbenchStore event application", () => {
     const timeline = buildTimeline(state);
     const runItem = timeline.find((item) => item.type === "run");
     if (runItem?.type !== "run") throw new Error("expected run item");
-    expect(statusLineText(runItem.run, false)).toBe("演示环境未启动，启动后自动开始");
+    expect(statusLineText(runItem.run, false)).toBe("运行环境检查中");
   });
 
   it("derives the cancelled note from the version history", async () => {

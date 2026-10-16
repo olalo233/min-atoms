@@ -1,15 +1,15 @@
 "use client";
 
-import { Atom, ExternalLink, LoaderCircle, RefreshCw } from "lucide-react";
+import { ExternalLink, RefreshCw } from "lucide-react";
 import type { VersionDTO } from "@min-atoms/protocol";
 
-import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 import { ICON_BUTTON } from "./project-header";
+import { RuntimeWaiting, type RuntimeWaitingProps } from "./runtime-waiting";
 import { VersionMenu } from "./version-menu";
 
-interface PreviewPaneProps {
+interface PreviewPaneProps extends RuntimeWaitingProps {
   className?: string;
   vmUp: boolean | null;
   previewUrl: string | null;
@@ -45,6 +45,11 @@ function LivePill() {
 export function PreviewPane({
   className,
   vmUp,
+  runtimePhase,
+  runtimeDetail,
+  runtimeWaitingSince,
+  runtimeWakePending,
+  onRuntimeRetry,
   previewUrl,
   previewReady,
   previewKey,
@@ -99,32 +104,15 @@ export function PreviewPane({
           )}
           {/* Rendered after the iframe so toggling it never touches the iframe node. */}
           {live && <div aria-hidden="true" className="wb-progress" />}
-          {envDown ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-zinc-50 px-6 text-center">
-              <span className="flex size-14 items-center justify-center rounded-2xl bg-white text-zinc-400 shadow-[var(--shadow-card)]">
-                <Atom className="size-7" />
-              </span>
-              <p className="mt-1 text-[15px] font-semibold text-zinc-800">演示环境未启动</p>
-              <p className="max-w-xs text-[13px] text-zinc-500">环境启动后，排队中的任务会自动开始</p>
-            </div>
-          ) : (
-            !showIframe && (
-              <div className="absolute inset-0 flex flex-col bg-white" aria-busy="true">
-                <div className="flex flex-1 flex-col gap-3 p-5 sm:p-8">
-                  <Skeleton className="h-7 w-2/5 rounded-lg" />
-                  <Skeleton className="h-4 w-3/5 rounded-md" />
-                  <Skeleton className="mt-2 h-11 w-full rounded-xl" />
-                  <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-2">
-                    <Skeleton className="min-h-16 rounded-xl" />
-                    <Skeleton className="hidden min-h-16 rounded-xl sm:block" />
-                  </div>
-                </div>
-                <p className="flex items-center justify-center gap-2 border-t border-zinc-950/[0.05] py-3 text-[13px] text-zinc-500">
-                  <LoaderCircle className="size-3.5 animate-spin text-indigo-500" aria-hidden="true" />
-                  {vmUp === null ? "正在检查演示环境…" : "正在唤醒应用…"}
-                </p>
-              </div>
-            )
+          {!showIframe && (
+            <RuntimeWaiting
+              up={vmUp === true}
+              runtimePhase={runtimePhase}
+              runtimeDetail={runtimeDetail}
+              runtimeWaitingSince={runtimeWaitingSince}
+              runtimeWakePending={runtimeWakePending}
+              onRuntimeRetry={onRuntimeRetry}
+            />
           )}
         </div>
       </div>

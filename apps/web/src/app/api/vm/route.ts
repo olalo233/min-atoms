@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth/session";
 import { unauthorized } from "@/lib/server/http";
-import { isVmUp } from "@/lib/server/vm";
+import { getVmStatus } from "@/lib/server/vm";
 
 export const dynamic = "force-dynamic";
 
@@ -12,5 +12,5 @@ export async function GET() {
     return unauthorized();
   }
 
-  return NextResponse.json({ up: await isVmUp() });
+  return NextResponse.json(await getVmStatus(), { headers: { "cache-control": "no-store" } });
 }

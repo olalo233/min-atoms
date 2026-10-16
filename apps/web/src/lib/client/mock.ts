@@ -1,3 +1,4 @@
+import type { RuntimePhase, RuntimeStatus, VmStatus } from "../runtime";
 import type { MessageDTO, ProjectDetail, RunDTO, RunEvent, VersionDTO } from "@min-atoms/protocol";
 
 import type { RunMode, WorkbenchSource } from "./source";
@@ -280,6 +281,15 @@ function buildScenario(projectId: string, scenario: string): ScenarioData {
         stream: [],
         vmUp: true,
       };
+    case "env-checking":
+    case "env-starting":
+    case "env-restoring":
+    case "env-stopping":
+    case "env-retiring":
+    case "env-retired":
+    case "env-running":
+    case "env-error":
+    case "env-unavailable":
     case "env-down":
       return {
         detail: {
@@ -461,7 +471,8 @@ const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 class MockSource implements WorkbenchSource {
   private readonly detail: ProjectDetail;
   private readonly plan: { event: RunEvent; delayMs: number }[];
-  private readonly vmUp: boolean;
+  private runtime: VmStatus;
+  private readonly scenario: string;
   private readonly versions: VersionDTO[];
   private listeners = new Set<(id: number, event: RunEvent) => void>();
   private timers: ReturnType<typeof setTimeout>[] = [];
@@ -477,7 +488,13 @@ class MockSource implements WorkbenchSource {
   constructor(projectId: string, scenario: string) {
     const data = buildScenario(projectId, scenario);
     this.detail = data.detail;
-    this.vmUp = data.vmUp;
+    this.scenario = scenario;
+    const phase = scenario === "env-down" ? "stopped" : scenario.slice(4);
+    this.runtime = {
+      up: data.vmUp,
+      phase: data.vmUp ? "running" : phase === "checking" ? "starting" : phase as RuntimePhase,
+      ...(phase === "error" ? { detail: "暂时没有可用资源，请稍后重试。" } : {}),
+    };
     this.versions = [...data.detail.versions];
     this.nextEventId = data.detail.lastEventId;
     this.messageSeq = data.detail.messages.reduce((max, m) => Math.max(max, m.seq), 0);
@@ -537,8 +554,16 @@ class MockSource implements WorkbenchSource {
     };
   }
 
-  async getVmUp(): Promise<boolean> {
-    return this.vmUp;
+  async getVmStatus(): Promise<VmStatus> {
+    // Keep checking visible for visual review; effect cleanup still stops polling.
+    if (this.scenario === "env-checking") await delay(60_000);
+    return this.runtime;
+  }
+
+  async wakeRuntime(): Promise<RuntimeStatus> {
+    await delay(600);
+    this.runtime = { up: false, phase: this.runtime.phase === "retired" ? "restoring" : "starting" };
+    return this.runtime;
   }
 
   async ensure(): Promise<unknown> {

@@ -4,16 +4,18 @@ import { useState } from "react";
 import { ChevronRight, CircleAlert, Clock, LoaderCircle, RotateCw, Square, WandSparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { runtimeCopy } from "@/lib/runtime";
 import { limitLines } from "@/lib/client/format";
 import { isActivePhase, runDurationText, statusLineText, type RunViewData } from "@/lib/client/store";
 
 import { DEFAULT_AGENT, type AgentIdentity } from "./agent-identity";
 import { AtomAvatar } from "./atom-avatar";
 import { Markdown } from "./markdown";
+import { RuntimeRetry, type RuntimeWaitingProps } from "./runtime-waiting";
 import { StepList } from "./step-list";
 import { VersionCard } from "./version-card";
 
-interface RunBlockProps {
+interface RunBlockProps extends RuntimeWaitingProps {
   run: RunViewData;
   /** Body text: live text deltas, or the assistant message for finished runs. */
   finalText: string | null;
@@ -58,7 +60,7 @@ function RunStatus({ text, working }: { text: string; working: boolean }) {
       ) : (
         <>
           <Clock className="size-3.5 shrink-0 text-zinc-400" aria-hidden="true" />
-          <span className="min-w-0 truncate text-zinc-500">{text}</span>
+          <span className="min-w-0 text-zinc-500">{text}</span>
         </>
       )}
     </p>
@@ -83,7 +85,7 @@ function FailureBlock({ run, onFix, onRetryRun }: { run: RunViewData; onFix: () 
     <div className="wb-enter flex gap-2.5 rounded-xl bg-red-50/80 px-3.5 py-3 ring-1 ring-red-600/15" role="group" aria-label="构建失败">
       <CircleAlert className="mt-0.5 size-4 shrink-0 text-red-600" aria-hidden="true" />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-red-700">{envRestart ? "运行被中断：演示环境重启了" : "构建未通过"}</p>
+        <p className="text-sm font-semibold text-red-700">{envRestart ? "运行被中断：运行环境重启了" : "构建未通过"}</p>
         {!envRestart && <p className="mt-0.5 text-sm [overflow-wrap:anywhere] text-red-700/80">{reason}</p>}
         {details && (
           <details className="group/details mt-2">
@@ -149,6 +151,10 @@ export function RunBlock({
   finalText,
   cancelledNote,
   vmUp,
+  runtimePhase,
+  runtimeDetail,
+  runtimeWakePending,
+  onRuntimeRetry,
   currentVersionId,
   restoreBlocked,
   onRestoreRequest,
@@ -156,7 +162,7 @@ export function RunBlock({
   onRetryRun,
 }: RunBlockProps) {
   const active = isActivePhase(run.phase);
-  const statusText = statusLineText(run, vmUp);
+  const statusText = statusLineText(run, vmUp, runtimePhase);
   const showSteps = run.mode === "build" && run.steps.length > 0;
   const streaming = active && run.hasTextEvents;
   const agent = DEFAULT_AGENT;
@@ -168,6 +174,12 @@ export function RunBlock({
         <RunHeader agent={agent} active={active} />
         {showSteps && <StepList steps={run.steps} running={active} durationText={runDurationText(run)} />}
         {statusText && <RunStatus text={statusText} working={run.phase !== "queued"} />}
+        {run.phase === "queued" && vmUp !== true && (runtimePhase === "error" || runtimePhase === "unavailable") && (
+          <div className="space-y-2 lg:hidden">
+            <p className="text-[13px] leading-5 text-red-700 [overflow-wrap:anywhere]">{runtimeCopy(runtimePhase, runtimeDetail).body}</p>
+            <RuntimeRetry pending={runtimeWakePending} onRetry={onRuntimeRetry} />
+          </div>
+        )}
         {finalText && <Markdown text={finalText} streaming={streaming} />}
         <RunOutcome
           run={run}

@@ -192,6 +192,15 @@
   }
 }
 
+.runtime-breathe {
+  animation: runtime-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes runtime-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -204,7 +213,18 @@
   .press:active:not(:disabled) {
     transform: none;
   }
-  .live-dot {
+  .live-dot,
+  .runtime-breathe {
     animation: none;
   }
+}
+
+/* A quiet phase change inside fixed runtime waiting slots. */
+.runtime-enter {
+  animation: runtime-enter 200ms ease-out;
+}
+
+@keyframes runtime-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
