@@ -22,5 +22,5 @@ else
   tar -C "$MA_ROOT" -czf - templates/fullstack/AGENTS.md | remote 'sudo tar -xzf - -C /opt/min-atoms'
 fi
 upload_private_env
-remote "sudo bash -c 'cd /opt/min-atoms && bun install --frozen-lockfile --filter ./apps/manager && docker build -f infra/image/Dockerfile -t min-atoms/project . && systemctl restart ma-firewall.service ma-gateway.service ma-manager.service'"
+remote "sudo bash -c 'cd /opt/min-atoms && bun install --frozen-lockfile --filter ./apps/manager && docker build -f infra/image/Dockerfile -t min-atoms/project . && systemctl restart ma-firewall.service ma-gateway.service ma-manager.service && bash infra/vm/install-idle.sh'"
 wait_health

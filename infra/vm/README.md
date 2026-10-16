@@ -5,6 +5,11 @@ commands: it never invokes gcloud/cf, opens private files, or changes the host.
 Use Bash, gcloud, jq, curl and the official Node.js `cf` CLI (1.0.0-beta.12).
 If `cf` is shadowed, use `CF_BIN=cloudflare` for the Cloudflare scripts.
 The GCP project, VM, zone and Cloudflare zone are fixed in `common.sh`.
+New VMs (including `--from-snapshot`) use Spot `t2d-standard-2` with a
+50 GB pd-balanced boot disk and no service account. Spot preemption stops
+the VM instead of deleting it; restart with `up.sh`. An in-flight run is
+marked failed on the next manager start by the existing recovery path.
+Ownership checks also accept the previous `e2-standard-4` VM shape.
 
 SSH prerequisite: the existing IAP firewall must allow this VM, and the PM must
 authorize the public key for `tmars` on this VM only, with
@@ -54,7 +59,8 @@ First setup:
 
 Bootstrap installs Debian Docker/iptables, cloudflared from its signed official
 apt repository, and Bun 1.4.2 from the official release archive. It installs the
-four systemd units and starts the firewall before gateway and manager.
+four runtime systemd units and starts the firewall before gateway and manager,
+then installs and enables `ma-idle.timer` and its oneshot service.
 It preserves other `/etc/docker/daemon.json` fields and sets exactly
 `"dns": ["8.8.8.8"]`: containers cannot use the host's metadata resolver while
 metadata DROP remains enforced. Changed config restarts active Docker through
@@ -75,6 +81,20 @@ root frozen lockfile, builds `min-atoms/project`, and restarts the gateway and
 manager. The scaffold's runtime AGENTS.md and docs are included; dependencies,
 Git/Jujutsu metadata and .env files are excluded. Private env/key updates travel
 as one env payload on SSH stdin. Deployment does not build or transfer the web app.
+Deployment also installs/enables the idle units, including on older restored disks.
+
+The VM powers itself off after 30 minutes without manager activity, checked
+every five minutes starting 15 minutes after boot (so shutdown normally occurs
+30–35 minutes after last use). Manager start, authenticated `/projects/*`
+requests, SSE open/close and run completion reset the idle clock. Any queued
+or running run or open SSE stream keeps `/health`'s `idleSeconds` at zero.
+Health polling does not reset it. A failed health check, invalid JSON or missing
+idle field leaves the VM running. This measures manager use; direct preview
+traffic and SSH sessions do not count as activity.
+To override the default, set `MA_IDLE_SHUTDOWN_SECONDS=<seconds>` in the
+optional `/etc/min-atoms/idle.conf` (systemd EnvironmentFile syntax); `0`
+disables idle shutdown. The idle service reads no private manager environment.
+Automatic poweroff keeps the disk and project data; restart with `up.sh`.
 
 `down.sh` stops the VM and retains its disk. `destroy.sh --confirm-destroy` is
 only for a user-requested final teardown: it deletes the owned VM, scoped DNS
@@ -125,6 +145,7 @@ python3 infra/vm/tests/private-env.py
 python3 infra/vm/tests/cloudflare-ingress.py
 python3 infra/vm/tests/docker-dns.py
 python3 infra/vm/tests/deep-archive.py
+python3 infra/vm/tests/spot-idle.py
 infra/vm/up.sh --dry-run
 infra/vm/bootstrap.sh --dry-run
 infra/vm/cloudflare.sh --dry-run

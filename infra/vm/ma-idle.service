@@ -1,0 +1,8 @@
+[Unit]
+Description=Power off an idle min-atoms VM
+After=ma-manager.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/min-atoms/idle.conf
+ExecStart=/bin/bash /opt/min-atoms/infra/vm/idle-check.sh

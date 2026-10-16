@@ -15,6 +15,10 @@ export function createManagerApp(options: {
 }) {
   const app = new Hono();
   const secret = Buffer.from(`Bearer ${options.secret}`);
+  const now = options.now ?? Date.now;
+  let lastActivity = now();
+  let openStreams = 0;
+  const activity = () => { lastActivity = now(); };
   app.onError((error, c) => error instanceof ManagerError
     ? c.json({ error: error.message }, error.status)
     : c.json({ error: "Manager operation failed" }, 503));
@@ -33,12 +37,16 @@ export function createManagerApp(options: {
     if (c.req.method === "GET" && /^\/projects\/[^/]+\/stream$/.test(c.req.path)) return next();
     const actual = Buffer.from(c.req.header("Authorization") ?? "");
     if (actual.length !== secret.length || !timingSafeEqual(actual, secret)) return c.json({ error: "Unauthorized" }, 401);
+    activity();
     await next();
   });
 
-  app.get("/health", async c => c.json(ManagerHealthResponseSchema.parse({
-    ok: true, version: "0.1.0", containers: await options.runtime.count(),
-  })));
+  app.get("/health", async c => {
+    const [containers, activeRuns] = await Promise.all([options.runtime.count(), options.store.hasActiveRuns()]);
+    const idleSeconds = activeRuns || openStreams > 0 ? 0
+      : Math.max(0, Math.floor((now() - Math.max(lastActivity, options.events.lastRunFinishedAt ?? lastActivity)) / 1000));
+    return c.json(ManagerHealthResponseSchema.parse({ ok: true, version: "0.1.0", containers, idleSeconds }));
+  });
   app.post("/projects/:id/ensure", async c => {
     validateProjectId(c.req.param("id"));
     const body = ManagerEnsureRequestSchema.safeParse(await c.req.json().catch(() => undefined));
@@ -72,9 +80,12 @@ export function createManagerApp(options: {
     const project = await options.runtime.project(id);
     c.header("Content-Type", "text/event-stream");
     c.header("Cache-Control", "no-cache");
+    openStreams++;
+    activity();
     return c.body(eventStream({
       projectId: project.id, after, events: options.events, store: options.store,
       signal: c.req.raw.signal, timers: options.timers,
+      onClose() { openStreams--; activity(); },
     }));
   });
   return app;

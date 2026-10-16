@@ -95,6 +95,13 @@ class DockerDnsTest(unittest.TestCase):
                                         str(self.vm / f'{unit}.service'),
                                         f'/etc/systemd/system/{unit}.service'])
             self.assertLess(installed, reload)
+        idle_reload = max(i for i, command in enumerate(commands) if command == ['systemctl', 'daemon-reload'])
+        for unit in ('ma-idle.service', 'ma-idle.timer'):
+            installed = commands.index(['install', '-m', '0644', str(self.vm / unit), f'/etc/systemd/system/{unit}'])
+            self.assertLess(installed, idle_reload)
+        idle_start = commands.index(['systemctl', 'enable', '--now', 'ma-idle.timer'])
+        self.assertLess(idle_reload, idle_start)
+        self.assertLess(services, idle_start)
         restarts = [i for i, command in enumerate(commands)
                     if command == ['systemctl', 'restart', 'docker.service']]
         self.assertEqual(len(restarts), int(restarted))

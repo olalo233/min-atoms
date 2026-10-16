@@ -102,7 +102,10 @@ export const ProjectDetailSchema = z.object({
 });
 
 // Manager API request and response bodies documented in architecture.md §10.
-export const ManagerHealthResponseSchema = z.object({ ok: z.boolean(), version: z.string(), containers: z.number().int().nonnegative() });
+export const ManagerHealthResponseSchema = z.object({
+  ok: z.boolean(), version: z.string(), containers: z.number().int().nonnegative(),
+  idleSeconds: z.number().int().nonnegative().optional(),
+});
 export const ManagerEnsureRequestSchema = z.object({ previewLabel: z.string().min(1) });
 export const ManagerEnsureResponseSchema = z.object({ ready: z.literal(true) });
 export const ManagerKickRequestSchema = z.object({ previewLabel: z.string().min(1) });

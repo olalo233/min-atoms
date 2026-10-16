@@ -64,7 +64,7 @@ require_owned_vm() {
   jq -e --arg name "$MA_VM" --arg zone "$MA_ZONE" \
     '.name == $name and .labels.app == "min-atoms" and
      (.zone | endswith("/" + $zone)) and
-     (.machineType | endswith("/e2-standard-4")) and
+     (.machineType | endswith("/t2d-standard-2") or endswith("/e2-standard-4")) and
      ((.serviceAccounts // []) | length == 0) and
      ([.metadata.items[]? | select(.key == "block-project-ssh-keys") | .value] == ["true"])' <<< "$json" >/dev/null \
     || die 'VM ownership or security configuration differs; refusing to operate.'

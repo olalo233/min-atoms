@@ -51,18 +51,22 @@ if args[:3] == ['compute', 'snapshots', 'list']:
     sys.exit()
 assert '--zone=asia-northeast1-b' in args
 if args[:3] == ['compute', 'instances', 'create']:
+    assert {'--machine-type=t2d-standard-2', '--provisioning-model=SPOT',
+            '--instance-termination-action=STOP', '--boot-disk-size=50GB',
+            '--boot-disk-type=pd-balanced', '--labels=app=min-atoms',
+            '--no-service-account', '--no-scopes'} <= set(args), args
     keys = next(a for a in args if a.startswith('--metadata-from-file=ssh-keys='))
     record({'tool': 'gcloud', 'op': 'create', 'source': [a for a in args if a.startswith(('--source-snapshot', '--image'))],
             'metadata': [a for a in args if a.startswith('--metadata=')],
             'sshKeys': open(keys.split('=', 2)[2]).read()})
-    state.update(deleted=False, status='RUNNING')
+    state.update(deleted=False, status='RUNNING', machineType='t2d-standard-2')
     save()
     sys.exit()
 if args[:3] == ['compute', 'instances', 'describe']:
     fmt = next(arg for arg in args if arg.startswith('--format='))[9:]
     if fmt == 'json':
         print(json.dumps({'name': 'min-atoms-vm', 'labels': {'app': 'min-atoms'},
-            'zone': 'zones/asia-northeast1-b', 'machineType': 'types/e2-standard-4',
+            'zone': 'zones/asia-northeast1-b', 'machineType': 'types/' + state.get('machineType', 'e2-standard-4'),
             'serviceAccounts': [], 'metadata': {'items': [{'key': 'block-project-ssh-keys', 'value': 'true'}]}}))
     elif fmt == 'value(status)':
         print(state['status'])
@@ -292,6 +296,25 @@ class DeepArchiveTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn(b'No ready min-atoms snapshot', result.stderr)
         self.assertEqual(calls, [])
+
+    def test_fresh_vm_uses_spot_shape_and_keeps_ssh_metadata(self):
+        self.vm(deleted=True)
+        result, calls = self.run_script('up.sh', '--skip-health')
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertEqual(calls, [{'tool': 'gcloud', 'op': 'create',
+                                  'source': ['--image-family=debian-12', '--image-project=debian-cloud'],
+                                  'metadata': ['--metadata=block-project-ssh-keys=true'],
+                                  'sshKeys': 'tmars:ssh-rsa AAAATEST\n'}])
+
+    def test_owned_vm_accepts_only_new_and_legacy_machine_types(self):
+        for machine, expected in (('t2d-standard-2', 0), ('e2-standard-4', 0),
+                                  ('e2-standard-2', 1), ('t2d-standard-4', 1)):
+            with self.subTest(machine=machine):
+                self.vm(machineType=machine)
+                result = subprocess.run(['bash', '-c', 'source "$1/common.sh"; require_owned_vm',
+                                         '_', str(self.root / 'infra/vm')],
+                                        env=self.env, capture_output=True, timeout=30)
+                self.assertEqual(result.returncode, expected, result.stderr.decode())
 
     def test_freeze_fails_when_containers_cannot_be_listed(self):
         # The root guard is the only change; docker exits non-zero as on a broken daemon.

@@ -10,7 +10,7 @@ export function createManager(options: {
   runtime?: ProjectRuntime; now?: () => number; timers?: HeartbeatTimers;
 }) {
   const runtime = options.runtime ?? new ProjectRuntime(options.store);
-  const events = new DurableEvents(options.store);
+  const events = new DurableEvents(options.store, options.now);
   const app = createManagerApp({ ...options, runtime, events });
   return {
     app, runtime, events, store: options.store,

@@ -7,8 +7,9 @@ type Listener = (record: StoredEvent) => void;
 export class DurableEvents {
   private readonly listeners = new Map<string, Set<Listener>>();
   private readonly write = serialLane();
+  lastRunFinishedAt: number | undefined;
 
-  constructor(private readonly store: ManagerStore) {}
+  constructor(private readonly store: ManagerStore, private readonly now: () => number = Date.now) {}
 
   subscribe(projectId: string, listener: Listener): () => void {
     const listeners = this.listeners.get(projectId) ?? new Set<Listener>();
@@ -45,6 +46,7 @@ export class DurableEvents {
     return this.write(async () => {
       const store = this.store as RunStore;
       const records = await store.finish(projectId, input);
+      if (records.length) this.lastRunFinishedAt = this.now();
       this.publish(projectId, records);
       return records;
     });
@@ -75,6 +77,7 @@ export const heartbeatTimers: HeartbeatTimers = {
 export function eventStream(options: {
   projectId: string; after: number; events: DurableEvents; store: ManagerStore;
   signal: AbortSignal; timers?: HeartbeatTimers;
+  onClose?: () => void;
 }): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let cleanup = () => {};
@@ -91,6 +94,7 @@ export function eventStream(options: {
         closed = true;
         unsubscribe(); stopTimer(); buffered.clear();
         options.signal.removeEventListener("abort", abort);
+        options.onClose?.();
       };
       const abort = () => { cleanup(); controller.close(); };
       const fail = () => {

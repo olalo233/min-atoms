@@ -40,3 +40,4 @@ fi
 # Starts inactive Docker with the new config; does not restart an active daemon.
 run systemctl enable --now docker.service
 run systemctl restart ma-firewall.service ma-gateway.service ma-manager.service ma-cloudflared.service
+bash "$MA_ROOT/infra/vm/install-idle.sh" "$@"

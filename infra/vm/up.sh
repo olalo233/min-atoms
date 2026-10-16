@@ -26,7 +26,7 @@ create_vm() {
     printf 'tmars:%s\n' "$(cut -d' ' -f1,2 "$ssh_pub")" > "$keys"
   fi
   run gcloud compute instances create "$MA_VM" --project="$MA_PROJECT" --zone="$MA_ZONE" \
-    --machine-type=e2-standard-4 "${boot_source[@]}" \
+    --machine-type=t2d-standard-2 --provisioning-model=SPOT --instance-termination-action=STOP "${boot_source[@]}" \
     --boot-disk-size=50GB --boot-disk-type=pd-balanced --labels=app=min-atoms \
     --metadata=block-project-ssh-keys=true --metadata-from-file=ssh-keys="$keys" \
     --no-service-account --no-scopes

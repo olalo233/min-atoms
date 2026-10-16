@@ -117,6 +117,14 @@ class PrivateEnvTest(unittest.TestCase):
                 self.assertEqual(expected.count(b'DEEPSEEK_API_KEY='), 1)
                 self.assertEqual((self.config / 'env').read_text(), LOCAL_ENV)
                 self.assertEqual((self.config / 'deepseek.key').read_text(), KEY + '\n')
+                if name == 'deploy.sh':
+                    self.assertTrue(any('bash infra/vm/install-idle.sh' in arg for call in calls for arg in call['args']))
+                    archive_payload = next(base64.b64decode(call['stdin']) for call in calls
+                                           if base64.b64decode(call['stdin']).startswith(b'\x1f\x8b'))
+                    with tarfile.open(fileobj=io.BytesIO(archive_payload), mode='r:gz') as archive:
+                        for path in ('infra/vm/idle-check.sh', 'infra/vm/install-idle.sh',
+                                     'infra/vm/ma-idle.service', 'infra/vm/ma-idle.timer'):
+                            self.assertIn(path, archive.getnames())
 
     def test_dry_run_never_reads_private_inputs_or_calls_gcloud(self):
         self.env['MA_TEST_CONFIG'] = str(self.root / 'missing-private-inputs')

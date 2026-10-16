@@ -175,12 +175,12 @@ Standard flow:
    ingress (`ma-vm.expii.top` → manager, wildcard → gateway), verifies the
    scoped DNS records, and saves a private pool of preview hostnames for
    seeding.
-2. `infra/vm/up.sh --skip-health` — creates the `e2-standard-4` VM (no
+2. `infra/vm/up.sh --skip-health` — creates the Spot `t2d-standard-2` VM (no
    service account, no scopes) or starts it if stopped. Later runs wait for
    manager health instead.
 3. `infra/vm/bootstrap.sh` — installs Docker, cloudflared, and Bun on the VM,
-   installs the four systemd units (firewall, cloudflared, gateway, manager),
-   and starts them.
+   installs the four runtime systemd units (firewall, cloudflared, gateway,
+   manager), starts them, and enables the idle shutdown timer.
 4. `infra/vm/deploy.sh` — ships the source archive to `/opt/min-atoms`,
    installs manager dependencies from the frozen lockfile, builds the
    `min-atoms/project` image, restarts the services, and waits for health.
@@ -188,6 +188,15 @@ Standard flow:
    data persist). `infra/vm/destroy.sh --confirm-destroy` is the final
    teardown: it deletes only the owned VM, the scoped DNS records, and the
    dedicated tunnel, each confirmed by readback.
+
+Spot preemption stops the VM and retains its disk. An in-flight run is marked
+failed on the next manager start; restart with `infra/vm/up.sh`. The VM also
+powers itself off after 30 minutes without manager use, checked every five
+minutes. Authenticated project requests, open SSE streams and queued/running
+runs keep it active; health polling does not. Direct preview traffic and SSH
+do not reset this clock. Set `MA_IDLE_SHUTDOWN_SECONDS=0` in the VM's optional
+`/etc/min-atoms/idle.conf` to disable it. Deploy installs/enables this timer
+on restored older disks too.
 
 For long idle periods, `infra/vm/archive.sh` copies only the data a rebuild
 cannot recreate (each project's Git workspace, app SQLite data and agent

@@ -30,6 +30,7 @@ export class MemoryStore implements ManagerStore {
   async project(projectId: string) { return this.projects.get(projectId); }
   async busy(projectId: string) { return this.runningProjects.has(projectId) || this.queued.includes(projectId); }
   async running(projectId: string) { return this.runningProjects.has(projectId); }
+  async hasActiveRuns() { return this.runningProjects.size > 0 || this.queued.length > 0; }
   async backlog(projectId: string, after: number) {
     return this.rows.filter(row => row.projectId === projectId && row.id > after).map(({ id, event }) => ({ id, event }));
   }

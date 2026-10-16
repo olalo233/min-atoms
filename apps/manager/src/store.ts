@@ -12,6 +12,7 @@ export interface ManagerStore {
   project(id: string): Promise<RuntimeProject | undefined>;
   busy(id: string): Promise<boolean>;
   running(id: string): Promise<boolean>;
+  hasActiveRuns(): Promise<boolean>;
   backlog(projectId: string, after: number): Promise<StoredEvent[]>;
   appendEvents(projectId: string, events: RunEvent[]): Promise<StoredEvent[]>;
   recover(now: Date): Promise<Array<{ projectId: string; records: StoredEvent[] }>>;
@@ -114,6 +115,11 @@ export function createManagerStore<TResult extends PgQueryResultHKT>(
     async running(id) {
       const [row] = await db.select({ id: runs.id }).from(runs)
         .where(and(eq(runs.projectId, id), eq(runs.status, "running"))).limit(1);
+      return !!row;
+    },
+    async hasActiveRuns() {
+      const [row] = await db.select({ id: runs.id }).from(runs)
+        .where(inArray(runs.status, ["running", "queued"])).limit(1);
       return !!row;
     },
     async backlog(projectId, after) {
