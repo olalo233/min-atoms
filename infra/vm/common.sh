@@ -12,6 +12,9 @@ if [[ -n "${HOME:-}" ]]; then
   export MA_CONFIG=${HOME}/.config/min-atoms
 fi
 DRY_RUN=false
+# Dedicated R2 bucket for deep archives; only the operator's cf login can write it.
+MA_ARCHIVE_BUCKET=min-atoms-archive
+CF_BIN=${CF_BIN:-cf}
 
 die() { printf '%s\n' "$*" >&2; exit 1; }
 print_command() { printf '+ '; printf '%q ' "$@"; printf '\n'; }
@@ -62,7 +65,8 @@ require_owned_vm() {
     '.name == $name and .labels.app == "min-atoms" and
      (.zone | endswith("/" + $zone)) and
      (.machineType | endswith("/e2-standard-4")) and
-     ((.serviceAccounts // []) | length == 0)' <<< "$json" >/dev/null \
+     ((.serviceAccounts // []) | length == 0) and
+     ([.metadata.items[]? | select(.key == "block-project-ssh-keys") | .value] == ["true"])' <<< "$json" >/dev/null \
     || die 'VM ownership or security configuration differs; refusing to operate.'
 }
 wait_health() {
@@ -80,4 +84,41 @@ wait_health() {
     sleep 3
   done
   die 'Manager health timed out; check bootstrap, credentials and tunnel.'
+}
+vm_field() {
+  gcloud compute instances describe "$MA_VM" --project="$MA_PROJECT" --zone="$MA_ZONE" --format="value($1)"
+}
+vm_last_start_utc() { vm_field 'lastStartTimestamp.date("%Y-%m-%dT%H:%M:%SZ", tz=UTC)'; }
+# Runs one archive-host.sh subcommand on the VM as root, streaming the script itself.
+archive_host() {
+  if "$DRY_RUN"; then printf '+ remote: sudo archive-host.sh %s\n' "$*"; return; fi
+  local command arg
+  command="sudo bash -c $(printf '%q' "$(cat "$MA_ROOT/infra/vm/archive-host.sh")") archive-host.sh"
+  for arg in "$@"; do command+=" $(printf '%q' "$arg")"; done
+  remote "$command"
+}
+sha256_of() { shasum -a 256 "$1" | cut -d' ' -f1; }
+r2_get() { "$CF_BIN" r2 objects get "$1" --bucket-name "$MA_ARCHIVE_BUCKET" > "$2"; }
+# Upload, then read the object back: a zero exit status is not proof of storage.
+r2_put_verified() {
+  local key=$1 file=$2 type=$3 back
+  "$CF_BIN" r2 objects put "$key" --bucket-name "$MA_ARCHIVE_BUCKET" --file "$file" --content-type "$type" >/dev/null
+  back=$(mktemp)
+  if ! r2_get "$key" "$back" || [[ $(sha256_of "$back") != "$(sha256_of "$file")" ]]; then
+    rm -f "$back"
+    die "R2 readback did not match: $key"
+  fi
+  rm -f "$back"
+}
+# Prints the manifest of the newest complete archive; fails when none exists.
+r2_latest_manifest() {
+  local pointer manifest
+  pointer=$(mktemp); manifest=$(mktemp)
+  if r2_get latest.json "$pointer" 2>/dev/null &&
+    r2_get "$(jq -er '.manifest' "$pointer")" "$manifest"; then
+    cat "$manifest"; rm -f "$pointer" "$manifest"
+  else
+    rm -f "$pointer" "$manifest"
+    return 1
+  fi
 }

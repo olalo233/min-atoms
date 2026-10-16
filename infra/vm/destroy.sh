@@ -3,11 +3,59 @@ set -euo pipefail
 # shellcheck source=infra/vm/common.sh
 source "$(dirname "$0")/common.sh"
 confirmed=false
+vm_only=false
 for arg in "$@"; do
-  case "$arg" in --dry-run) DRY_RUN=true ;; --confirm-destroy) confirmed=true ;; *) die "Unknown option: $arg" ;; esac
+  case "$arg" in
+    --dry-run) DRY_RUN=true ;;
+    --confirm-destroy) confirmed=true ;;
+    --vm-only) vm_only=true ;;
+    *) die "Unknown option: $arg" ;;
+  esac
 done
 if ! "$DRY_RUN" && ! "$confirmed"; then die 'User must explicitly request teardown; then pass --confirm-destroy.'; fi
-CF_BIN=${CF_BIN:-cf}
+delete_vm() {
+  gcloud compute instances delete "$MA_VM" --project="$MA_PROJECT" --zone="$MA_ZONE" --quiet
+  instances=$(gcloud compute instances list --project="$MA_PROJECT" --filter="name=$MA_VM" --format=json)
+  jq -e --arg name "$MA_VM" '[.[] | select(.name == $name)] | length == 0' <<< "$instances" >/dev/null || die 'VM deletion not confirmed.'
+}
+# Retirement for long idle periods: snapshot the stopped disk, then delete only
+# the VM and its disk. Tunnel, DNS and preview hostnames stay for
+# up.sh --from-snapshot, or for restore.sh from the portable R2 data archive.
+if "$vm_only"; then
+  snapshot="$MA_VM-$(date -u +%Y%m%dt%H%M%Sz)"
+  snapshot_args=(--project="$MA_PROJECT" --source-disk="$MA_VM" --source-disk-zone="$MA_ZONE"
+    --storage-location="${MA_ZONE%-*}" --labels=app=min-atoms)
+  if "$DRY_RUN"; then
+    printf 'Require VM TERMINATED; warn if the R2 data archive predates its last start.\n'
+    print_command gcloud compute snapshots create "$snapshot" "${snapshot_args[@]}"
+    printf 'Read back the snapshot: READY, from this disk, labeled app=min-atoms.\n'
+    print_command gcloud compute instances delete "$MA_VM" --project="$MA_PROJECT" --zone="$MA_ZONE" --quiet
+    printf 'Read back instance and disk lists; tunnel and DNS are kept.\n'
+    exit 0
+  fi
+  require_owned_vm
+  [[ $(vm_field status) == TERMINATED ]] || die 'VM is not stopped; run archive.sh or down.sh first.'
+  started=$(vm_last_start_utc)
+  archived=$(r2_latest_manifest 2>/dev/null | jq -r '.createdAt // empty' || true)
+  if [[ -z $archived || ! $started < $archived ]]; then
+    printf 'Warning: the R2 data archive predates the last VM start (%s); only the snapshot is current.\n' "$started" >&2
+  fi
+  gcloud compute snapshots create "$snapshot" "${snapshot_args[@]}"
+  for _ in $(seq 120); do
+    status=$(gcloud compute snapshots describe "$snapshot" --project="$MA_PROJECT" --format='value(status)')
+    [[ $status == READY || $status == FAILED ]] && break
+    sleep 5
+  done
+  gcloud compute snapshots describe "$snapshot" --project="$MA_PROJECT" --format=json |
+    jq -e --arg disk "/zones/$MA_ZONE/disks/$MA_VM" \
+      '.status == "READY" and .labels.app == "min-atoms" and (.sourceDisk | endswith($disk))' >/dev/null ||
+    die "Snapshot $snapshot is not ready; the VM and disk were kept."
+  delete_vm
+  disks=$(gcloud compute disks list --project="$MA_PROJECT" --filter="name=$MA_VM" --format=json)
+  jq -e 'length == 0' <<< "$disks" >/dev/null || die 'Boot disk still exists; check it before deleting manually.'
+  printf 'Snapshot %s kept; VM and disk deleted; tunnel and DNS kept. Revive: infra/vm/up.sh --from-snapshot\n' "$snapshot"
+  exit 0
+fi
 if "$DRY_RUN"; then
   print_command gcloud compute instances delete "$MA_VM" --project="$MA_PROJECT" --zone="$MA_ZONE" --quiet
   print_command "$CF_BIN" tunnels list --name min-atoms --is-deleted=false
@@ -22,9 +70,7 @@ fi
 instances=$(gcloud compute instances list --project="$MA_PROJECT" --filter="name=$MA_VM" --format=json)
 if [[ $(jq --arg name "$MA_VM" '[.[] | select(.name == $name)] | length' <<< "$instances") != 0 ]]; then
   require_owned_vm
-  gcloud compute instances delete "$MA_VM" --project="$MA_PROJECT" --zone="$MA_ZONE" --quiet
-  instances=$(gcloud compute instances list --project="$MA_PROJECT" --filter="name=$MA_VM" --format=json)
-  jq -e --arg name "$MA_VM" '[.[] | select(.name == $name)] | length == 0' <<< "$instances" >/dev/null || die 'VM deletion not confirmed.'
+  delete_vm
 fi
 tunnels=$("$CF_BIN" tunnels list --name min-atoms --is-deleted=false)
 tunnels=$(jq '[.[] | select(.name == "min-atoms" and .deleted_at == null)]' <<< "$tunnels")

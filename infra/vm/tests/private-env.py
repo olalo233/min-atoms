@@ -27,7 +27,8 @@ if args[:3] == ['compute', 'instances', 'describe']:
     payload = b''
     print(json.dumps({'name': 'min-atoms-vm', 'labels': {'app': 'min-atoms'},
         'zone': 'zones/asia-northeast1-b', 'machineType': 'types/e2-standard-4',
-        'serviceAccounts': []}))
+        'serviceAccounts': [],
+        'metadata': {'items': [{'key': 'block-project-ssh-keys', 'value': 'true'}]}}))
 else:
     assert args[:2] == ['compute', 'ssh'], args
     assert args[2] == 'tmars@min-atoms-vm', args

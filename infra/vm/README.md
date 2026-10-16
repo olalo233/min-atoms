@@ -9,8 +9,10 @@ The GCP project, VM, zone and Cloudflare zone are fixed in `common.sh`.
 SSH prerequisite: the existing IAP firewall must allow this VM, and the PM must
 authorize the public key for `tmars` on this VM only, with
 `block-project-ssh-keys=true`. The local identity must already exist at
-`~/.ssh/google_compute_engine`; scripts never create keys or manage project or
-instance SSH metadata. All remote commands use the following connection flags
+`~/.ssh/google_compute_engine`; scripts never create keys or touch project SSH
+metadata. `up.sh` sets instance SSH metadata only when it creates the VM
+(including `--from-snapshot`, since metadata is not part of a disk snapshot):
+`block-project-ssh-keys=true` and that public key for `tmars`. All remote commands use the following connection flags
 (`--plain` bypasses SDK key/metadata management):
 
 ```sh
@@ -79,6 +81,41 @@ only for a user-requested final teardown: it deletes the owned VM, scoped DNS
 CNAMEs with the exact `min-atoms` comment and dedicated tunnel target, then the
 dedicated tunnel, confirming each deletion by readback. It retains local private
 files for PM disposal and does not alter other DNS, Access or zone settings.
+It never touches R2 archives or snapshots.
+
+Long idle periods: a stopped VM still pays for its 50 GB disk. Two copies
+replace it, each verified before anything is deleted:
+
+- `archive.sh` (portable data copy) keeps only what a rebuild cannot
+  recreate: each project's Git workspace (all versions and the working tree),
+  its app `/data` (SQLite) and agent `/state` (omp sessions, version
+  screenshots). Dependencies (`node_modules`), the workspace `dist` build and
+  `.ma` dev-server logs, the OS, Docker image, deployed source and private env
+  are left out. On a running VM it stops the manager and project containers,
+  streams `archive-host.sh` over SSH (independent of the deployed revision),
+  packs `/srv/min-atoms/projects` with numeric owners, checks the archive
+  against the frozen disk with `tar --diff`, saves a private copy under
+  `~/.config/min-atoms/archives/`, uploads the archive and `manifest.json` to
+  the dedicated R2 bucket `min-atoms-archive` with the operator's `cf` login,
+  reads each object back by sha256, writes `latest.json` last, and stops the
+  VM. The VM never holds R2 credentials.
+- `destroy.sh --vm-only --confirm-destroy` (fast GCP copy) requires a stopped
+  VM, warns if the R2 archive predates its last start, creates a regional
+  snapshot labeled `app=min-atoms` from the disk, waits for `READY`, and only
+  then deletes the VM and its disk, confirming both by readback. The tunnel,
+  DNS records and preview-host pool are kept, so projects return at the same
+  URLs. Snapshots are kept; delete old ones by hand.
+
+To revive on GCP, `up.sh --from-snapshot` recreates the VM from the newest
+ready snapshot, fully configured, and waits for manager health. To rebuild
+elsewhere or from scratch, run `up.sh --skip-health`, `bootstrap.sh`,
+`deploy.sh`, then `restore.sh` (or `restore.sh --archive <stamp>`) before
+sharing the link: it verifies the archive's sha256 locally and again on the
+VM, refuses a non-empty `/srv/min-atoms/projects`, unpacks, re-checks with
+`tar --diff`, reinstalls each workspace's dependencies from its own lockfile
+inside `min-atoms/project` as the app user, and waits for manager health.
+Containers are recreated on first project open. Control-plane data stays in
+Supabase, which the daily keepalive keeps active.
 
 Local checks:
 
@@ -87,11 +124,16 @@ shellcheck infra/vm/*.sh
 python3 infra/vm/tests/private-env.py
 python3 infra/vm/tests/cloudflare-ingress.py
 python3 infra/vm/tests/docker-dns.py
+python3 infra/vm/tests/deep-archive.py
 infra/vm/up.sh --dry-run
 infra/vm/bootstrap.sh --dry-run
 infra/vm/cloudflare.sh --dry-run
 infra/vm/deploy.sh --dry-run
 infra/vm/destroy.sh --dry-run
+infra/vm/archive.sh --dry-run
+infra/vm/restore.sh --dry-run
+infra/vm/destroy.sh --vm-only --dry-run
+infra/vm/up.sh --from-snapshot --dry-run
 git diff --check
 ```
 
@@ -101,7 +143,9 @@ The credential regression check uses dummy private files, a local gcloud stub
 that captures SSH stdin, and a health-response stub; it never contacts the VM.
 The ingress regression check uses a local cf stub and dummy records only.
 The DNS check uses fake host files and command stubs; it never invokes real
-Docker, systemd or cloud commands.
+Docker, systemd or cloud commands. The deep archive check uses gcloud/cf stubs
+and a fake bucket directory to cover ordering, readback, snapshot-before-delete
+and revive guards.
 
 References: [cloudflared apt repository](https://pkg.cloudflare.com/),
 [Caddy reverse proxy placeholders and headers](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy).

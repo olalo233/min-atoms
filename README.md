@@ -189,6 +189,16 @@ Standard flow:
    teardown: it deletes only the owned VM, the scoped DNS records, and the
    dedicated tunnel, each confirmed by readback.
 
+For long idle periods, `infra/vm/archive.sh` copies only the data a rebuild
+cannot recreate (each project's Git workspace, app SQLite data and agent
+state; no dependencies, build output, image or OS) to a dedicated Cloudflare
+R2 bucket, verifies it, and stops the VM. `infra/vm/destroy.sh --vm-only
+--confirm-destroy` then snapshots the stopped disk and deletes just the VM and
+its disk, keeping the tunnel and preview hostnames. `infra/vm/up.sh
+--from-snapshot` brings the VM back as it was; steps 2–4 plus
+`infra/vm/restore.sh` rebuild it from the R2 copy instead. Details are in
+`infra/vm/README.md`.
+
 The web app deploys separately to Vercel (`apps/web/vercel.json`: `hnd1`
 region, plus a daily `SELECT 1` keepalive cron guarded by `CRON_SECRET`).
 `deploy.sh` does not build or transfer it.
