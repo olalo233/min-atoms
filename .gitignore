@@ -7,6 +7,7 @@
 /.local-hooks
 /.worktrees
 /.scratch
+/.agent-runs
 /.jj
 /AGENTS.md
 /CLAUDE.md
