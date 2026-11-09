@@ -37,7 +37,7 @@
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.2",
     "eslint-config-next": "16.2.12",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   },
   "type": "module"
 }
